@@ -1,0 +1,4 @@
+# Preserve generated documents and brand assets byte-for-byte on Windows.
+*.pdf binary
+*.png binary
+*.ico binary
