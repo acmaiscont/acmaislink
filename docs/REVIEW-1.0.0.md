@@ -135,6 +135,24 @@ publicação, preferir o workflow GitHub Actions em ambiente isolado da sincroni
 
 ## Pendências antes de distribuição ampla
 
+### Revisão do carregamento em 17/09/2026
+
+Foram reproduzidas duas causas do carregamento após a abertura: verificações
+concorrentes recolocavam a cobertura depois da conclusão; o fallback de envio
+da senha podia clicar no cancelamento injetado pelo próprio aplicativo.
+Verificações agora são serializadas por operação, respostas antigas são
+descartadas e scripts de cobertura/barra respeitam a geração da navegação.
+O cadastro é confirmado junto com a mudança de estado. Operações lentas do
+cofre não bloqueiam o cancelamento; escritas canceladas são revertidas.
+
+Validação desta edição: 82 testes Python e 21 testes de DOM no Edge passaram.
+As páginas dos testes de DOM são fictícias, com a rede interceptada. Não houve
+novo teste do link real nem substituição da instalação em uso nesta revisão.
+A versão continua 1.0.0: o candidato corrigido deve ser reinstalado manualmente
+para substituir outra edição 1.0.0; atualização automática exige versão maior.
+
+### Homologações pendentes
+
 - Aprovação do proprietário sobre este candidato e suas alterações.
 - Instalação do pacote completo em VM Windows x64 sem WebView2.
 - Atualização real entre duas Releases controladas. O repositório ainda não

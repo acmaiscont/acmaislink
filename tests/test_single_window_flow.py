@@ -51,14 +51,16 @@ class FakeWindow:
         self.title = title
 
     def evaluate_js(self, script):
-        if "Boolean(document.querySelector" in script:
+        if "acmaisNavigationSnapshot" in script:
+            return {"url": self.url, "hasPassword": self.password_page, "heading": "0000 - Teste"}
+        if "return Boolean(acmaisPasswordInput())" in script:
             return self.password_page
         if "setter.call" in script:
             self.submitted = True
             return True
-        if "const headings" in script:
+        if "return acmaisHeading()" in script:
             return "0000 - Teste"
-        if "acmais-link-toolbar" in script:
+        if "const bar = document.createElement" in script:
             self.toolbar = True
             return True
         return None

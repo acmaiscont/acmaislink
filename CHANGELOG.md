@@ -23,3 +23,7 @@
 - Cache de atualização reconfirmado com o GitHub em cada sessão e revalidado antes de executar.
 - Rodapé apenas informativo, sem botões de atualização nem perguntas ao usuário.
 - Nova abertura aguarda por até 30 segundos se a troca de arquivos estiver em andamento.
+- Correção da cobertura de carregamento que reaparecia após abrir a pasta: verificações de navegação serializadas e respostas antigas descartadas.
+- Cancelamento e prazo de abertura continuam disponíveis durante operações lentas de credenciais; cadastro cancelado não é concluído depois.
+- Autenticação aguarda o botão correto do SharePoint, sem acionar os controles do aplicativo; campos de senha ocultos são ignorados.
+- Identificação da empresa também reconhece breadcrumbs e URLs com `RootFolder`.

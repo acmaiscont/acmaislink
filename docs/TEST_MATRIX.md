@@ -17,6 +17,12 @@
 | Interface | Abrir documentos | Botão e tela informam que a conexão está em andamento |
 | Inicialização | Ponte do WebView ainda indisponível | Interface tenta reconectar e nunca fica presa em `Carregando...` |
 | Navegação | Página do SharePoint renderiza senha de forma assíncrona | Aplicativo aguarda, autentica oculto e não retorna indevidamente ao início |
+| Navegação | Evento de página carregada e temporizador se sobrepõem | Apenas uma verificação conclui; cobertura não reaparece após a pasta pronta |
+| Navegação | Resposta antiga chega após cancelar e iniciar outro acesso | Não cancela, não cobre e não salva a operação nova |
+| Cadastro | Cofre de credenciais demora enquanto o usuário cancela | Cancelamento responde; escrita tardia é revertida |
+| Acesso | Campo de senha existe, mas botão de envio ainda não está pronto | Aguarda o botão do SharePoint sem clicar no cancelamento do app |
+| Acesso | Campo de senha oculto permanece no DOM da pasta | Não inicia outra autenticação |
+| Cadastro | Nome aparece em breadcrumb ou parâmetro `RootFolder` | Identificação extraída sem preenchimento manual |
 | Sessão | Fechar e reabrir o aplicativo | Cookies persistem quando permitidos pelo SharePoint |
 | Sessão | Executar o aplicativo novamente enquanto já está aberto | A segunda cópia encerra e a janela existente é restaurada em primeiro plano |
 | SharePoint | Upload e download | Operações concluídas no WebView |
@@ -31,3 +37,26 @@
 ## Validação inicial realizada
 
 Em 4 de setembro de 2026, o link de exemplo abriu a validação de senha do SharePoint e direcionou corretamente para `0000 - Teste`. A pasta exibiu o diretório `2026`. Upload, download, criação, renomeação, movimentação e exclusão não foram executados para evitar modificar o ambiente de exemplo.
+
+## Regressão do carregamento — 17/09/2026
+
+A suíte Python foi ampliada para reproduzir verificações concorrentes,
+respostas obsoletas, cancelamento durante acesso ao cofre e falha na montagem
+dos controles da pasta. A conclusão do cadastro e a troca de estado são
+confirmadas juntas; cancelar não depende do JavaScript da página remota.
+
+Os scripts injetados também têm testes de DOM em navegador real:
+
+```powershell
+node scripts/test-sharepoint-dom.cjs --report
+```
+
+Requer Node.js, Playwright disponível no caminho de módulos (`NODE_PATH`, se
+externo), ambiente Python do projeto e Microsoft Edge no Windows. O script não
+instala componentes. Há opções `ACMAIS_PYTHON` e `ACMAIS_BROWSER` para caminhos
+alternativos. Todas as requisições são interceptadas: páginas e credenciais são
+fictícias, sem acesso aos documentos dos clientes. Resultados locais ficam em
+`.qa/sharepoint-dom/`, fora do repositório.
+
+Esses testes não substituem a homologação da nova edição instalada com o link
+real do cliente nem o teste de atualização entre duas Releases.

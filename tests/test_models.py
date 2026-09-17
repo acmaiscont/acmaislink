@@ -8,7 +8,7 @@ class CompanyTests(unittest.TestCase):
         company = Company.from_payload({
             "code": "0000",
             "name": "Teste",
-            "url": "https://jcmcont.sharepoint.com/:f:/s/RemessasClientes/example",
+            "url": "https://tenant.sharepoint.com/:f:/s/Documentos/example",
         })
         self.assertEqual(company.code, "0000")
 
