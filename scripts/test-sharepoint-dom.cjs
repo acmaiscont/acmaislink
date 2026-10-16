@@ -44,6 +44,7 @@ function generatedScripts() {
     '    "heading": company_heading_script(),',
     '    "passwordPresent": password_page_present_script(),',
     '    "password": password_submission_script(secret, origin, navigation_token=10),',
+    '    "nativePassword": password_submission_script(secret, origin, navigation_token=10, include_cover=False, expected_url=origin + "/share"),',
     '    "covers": {token: navigation_cover_script(navigation_token=token) for token in tokens},',
     '    "toolbars": {token: navigation_toolbar_script(f"0000 - Empresa de teste {token}", navigation_token=token) for token in tokens},',
     '    "literalToolbar": navigation_toolbar_script("0000 - <img src=x onerror=window.__qa.pwned=true>", navigation_token=12),',
@@ -128,6 +129,20 @@ async function main() {
 
   const passwordForm = '<form><input id="password" type="password"><input id="btnSubmitPassword" type="submit" value="Verificar"></form>';
   try {
+    await test('Native authentication needs no JS bridge and creates no late cover', passwordForm, async page => {
+      await page.evaluate(() => { delete window.pywebview; });
+      assert.equal(await page.evaluate(scripts.nativePassword), true);
+      assert.equal(await page.locator('#password').inputValue(), scripts.secret);
+      assert.equal(await page.locator('#acmais-loading-cover').count(), 0);
+      assert.deepEqual(await page.evaluate(() => window.__qa.clicks), ['btnSubmitPassword']);
+    }, `${origin}/share`);
+
+    await test('Stale document cannot receive password after same-tenant redirect', passwordForm, async page => {
+      assert.equal(await page.evaluate(scripts.nativePassword), false);
+      assert.equal(await page.locator('#password').inputValue(), '');
+      assert.deepEqual(await page.evaluate(() => window.__qa.clicks), []);
+    });
+
     await test('Hidden password fields do not mark a ready folder as authentication',
       '<input type="password" hidden><input type="password" style="display:none"><div style="visibility:hidden"><input type="password"></div><h1>Documentos</h1>',
       async page => {
@@ -162,6 +177,123 @@ async function main() {
         await page.locator('.ms-Breadcrumb-itemLink').evaluate(element => element.remove());
         assert.equal(await page.evaluate(scripts.heading), '');
       });
+
+    await test('Semantic breadcrumb current span identifies the folder without query metadata',
+      `<nav aria-label="Breadcrumb"><ol><li><span aria-current="page">${company}</span></li></ol></nav>`,
+      async page => {
+        const snapshot = await page.evaluate(scripts.snapshot);
+        assert.equal(snapshot.heading, company);
+        assert.equal(snapshot.hasPassword, false);
+        assert.equal(snapshot.frameCount, 0);
+      }, `${origin}/share`);
+
+    await test('Hyphenated automation breadcrumb recognizes aria-current spans',
+      `<div data-automation-id="breadcrumb"><span aria-current="page">${company}</span></div>`,
+      async page => {
+        assert.equal((await page.evaluate(scripts.snapshot)).heading, company);
+      }, `${origin}/share`);
+
+    await test('Generic document title is not accepted as folder identity',
+      `<title>${company}</title><main><h1>Documentos</h1></main>`,
+      async page => {
+        assert.equal(await page.title(), company);
+        assert.equal((await page.evaluate(scripts.snapshot)).heading, '');
+      }, `${origin}/share`);
+
+    await test('Explicit breadcrumb aria-label supplies the full abbreviated name',
+      `<div data-automationid="breadcrumb"><button aria-label="${company}">Empresa...</button></div>`,
+      async page => {
+        assert.equal((await page.evaluate(scripts.snapshot)).heading, company);
+      }, `${origin}/share`);
+
+    await test('Explicit heading title supplies the full abbreviated name',
+      `<h1 title="${company}">Empresa...</h1>`,
+      async page => {
+        assert.equal((await page.evaluate(scripts.snapshot)).heading, company);
+      }, `${origin}/share`);
+
+    await test('Attributes and loose text outside explicit identity elements are ignored',
+      `<main><div title="${company}">${company}</div><button aria-label="${company}">Outro</button><h1>Documentos</h1></main>`,
+      async page => {
+        assert.equal((await page.evaluate(scripts.snapshot)).heading, '');
+      }, `${origin}/share`);
+
+    await test('Same-origin frame is counted without borrowing identity or authentication',
+      `<iframe srcdoc="&lt;h1&gt;${company}&lt;/h1&gt;&lt;input type=password&gt;"></iframe>`,
+      async page => {
+        // Verify the child really rendered before checking the top-level snapshot.
+        await page.frameLocator('iframe').locator('h1').waitFor({ state: 'visible' });
+        await page.frameLocator('iframe').locator('input[type=password]').waitFor({ state: 'visible' });
+        const snapshot = await page.evaluate(scripts.snapshot);
+        assert.equal(snapshot.frameCount, 1);
+        assert.equal(snapshot.heading, '');
+        assert.equal(snapshot.hasPassword, false);
+        assert.equal(await page.evaluate(scripts.passwordPresent), false);
+        assert.equal(await page.evaluate(scripts.password), false);
+        assert.equal(await page.frameLocator('iframe').locator('input[type=password]').inputValue(), '');
+      }, `${origin}/share`);
+
+    await test('Current semantic breadcrumb wins over matching ancestors and other candidates',
+      `<nav aria-label="Trilha de navegação"><a>2026 - Arquivos</a><span aria-current="page">${company}</span><a aria-current="false">9999 - Outro candidato</a></nav><h1>8888 - Outro heading</h1>`,
+      async page => {
+        assert.equal((await page.evaluate(scripts.snapshot)).heading, company);
+      }, `${origin}/share`);
+
+    await test('Heading whitespace is normalized after the separator and within the name',
+      '<h1>0000 - \r\nEmpresa de teste</h1>',
+      async page => {
+        assert.equal((await page.evaluate(scripts.snapshot)).heading, company);
+        await page.locator('h1').evaluate(element => {
+          element.textContent = ' \t0000\u00a0 -\tEmpresa\r\nde  teste\t';
+        });
+        assert.equal((await page.evaluate(scripts.snapshot)).heading, company);
+      }, `${origin}/share`);
+
+    for (const source of ['heading', 'breadcrumb']) {
+      const markup = source === 'heading' ? '<h1 id="company-name"></h1>' :
+        '<nav aria-label="Breadcrumb"><span id="company-name" aria-current="page"></span></nav>';
+      await test(`Numeric code accepts optional separator spaces in explicit ${source}`,
+        markup, async page => {
+          for (const separator of ['-', ' -', '- ', ' - ']) {
+            const label = `150${separator}Empresa de teste`;
+            await page.locator('#company-name').evaluate((element, value) => { element.textContent = value; }, label);
+            const snapshot = await page.evaluate(scripts.snapshot);
+            assert.equal(snapshot.heading, label.trim(), `${source}: ${label}`);
+            assert.equal(snapshot.hasPassword, false);
+          }
+        }, `${origin}/share`);
+    }
+
+    await test('Alphanumeric company codes retain the standard spaced separator',
+      '<h1 id="company-name"></h1>', async page => {
+        for (const code of ['ACME150', 'ACME-150', 'ABC']) {
+          const label = `${code} - Empresa de teste`;
+          await page.locator('#company-name').evaluate((element, value) => { element.textContent = value; }, label);
+          assert.equal((await page.evaluate(scripts.snapshot)).heading, label);
+        }
+      }, `${origin}/share`);
+
+    await test('Hyphenated words and numeric codes without names do not identify a company',
+      '<h1 id="company-name"></h1>', async page => {
+        for (const label of ['marketing-list', 'marketing- list', 'marketing -list', 'ACME150-Empresa', '150-', '150 - ']) {
+          await page.locator('#company-name').evaluate((element, value) => { element.textContent = value; }, label);
+          assert.equal((await page.evaluate(scripts.snapshot)).heading, '', label);
+        }
+      }, `${origin}/share`);
+
+    await test('Sharing password-page target label alone is never proof of folder identity',
+      '<span id="lblSharingLinkTarget">150-Empresa de teste</span><input type="password">',
+      async page => {
+        const authentication = await page.evaluate(scripts.snapshot);
+        assert.equal(authentication.hasPassword, true);
+        assert.equal(authentication.heading, '');
+        // A transitional disappearance of the password field must not promote
+        // this authentication-only label into a folder identity candidate.
+        await page.locator('input[type=password]').evaluate(element => element.remove());
+        const transitional = await page.evaluate(scripts.snapshot);
+        assert.equal(transitional.hasPassword, false);
+        assert.equal(transitional.heading, '');
+      }, `${origin}/share`);
 
     await test('RootFolder and id URL variants extract company identity', '<h1>Documentos</h1>', async page => {
       for (const [key, identity] of Object.entries(scripts.identities)) {

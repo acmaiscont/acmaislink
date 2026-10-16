@@ -2,13 +2,33 @@ from __future__ import annotations
 
 import json
 import re
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 
 FOLDER_PATTERN = re.compile(r"^(?P<code>.+?)\s+-\s+(?P<name>.+)$")
+NUMERIC_FOLDER_PATTERN = re.compile(r"^(?P<code>[0-9]+)\s*-\s*(?P<name>.+)$")
 
 
-def extract_company_identity(url: str, page_heading: str = "") -> tuple[str, str] | None:
+def _normalize_folder_name(value: str) -> str:
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def _folder_path_candidates(value: str, *, decode_passes: int) -> list[str]:
+    # SharePoint may nest a percent-encoded path inside an already encoded URL.
+    # Never decode indefinitely: query values were decoded once by parse_qs.
+    for _ in range(decode_passes):
+        decoded = unquote(value)
+        if decoded == value:
+            break
+        value = decoded
+    return [
+        candidate
+        for part in reversed(value.replace("\\", "/").split("/"))
+        if (candidate := _normalize_folder_name(part))
+    ]
+
+
+def extract_company_identity(url: str, page_heading: str = "", *, expected_code: str | None = None) -> tuple[str, str] | None:
     """Extract ``code - company name`` from a SharePoint folder URL or heading."""
     parsed = urlparse(url)
     candidates: list[str] = []
@@ -16,16 +36,22 @@ def extract_company_identity(url: str, page_heading: str = "") -> tuple[str, str
     for key in ("id", "rootfolder"):
         folder_path = query.get(key, [""])[0]
         if folder_path:
-            candidates.extend(part.strip() for part in folder_path.replace("\\", "/").split("/") if part.strip())
-    if page_heading.strip():
-        candidates.append(page_heading.strip())
+            candidates.extend(_folder_path_candidates(folder_path, decode_passes=1))
+    if page_heading:
+        candidates.append(_normalize_folder_name(page_heading))
+    # Some direct folder links carry the name only in the URL path. Prefer the
+    # explicit query/DOM identity and use this less-specific source as fallback.
+    candidates.extend(_folder_path_candidates(parsed.path, decode_passes=2))
 
     for candidate in candidates:
-        match = FOLDER_PATTERN.match(candidate)
+        # Numeric company codes also occur as "150-NAME" in SharePoint.
+        # Keep the spaced separator mandatory for other codes, so arbitrary
+        # hyphenated words (e.g. marketing-list) are not treated as companies.
+        match = NUMERIC_FOLDER_PATTERN.match(candidate) or FOLDER_PATTERN.match(candidate)
         if match:
             code = match.group("code").strip()
             name = match.group("name").strip()
-            if code and name:
+            if code and name and (expected_code is None or code.casefold() == expected_code.casefold()):
                 return code, name
     return None
 
@@ -36,18 +62,28 @@ _PAGE_HELPERS = r"""
   const acmaisPasswordInput = () => Array.from(document.querySelectorAll('input[type="password"]'))
     .find(acmaisVisible);
   const acmaisHeading = () => {
-    // Modern libraries often use breadcrumb buttons instead of an h1/h2.
-    // Never extract an identity from our own toolbar or loading controls.
-    const breadcrumbs = Array.from(document.querySelectorAll(
-      '.ms-Breadcrumb-itemLink, [data-automationid="breadcrumb"] a, ' +
-      '[data-automationid="breadcrumb"] button, [data-automation-id="breadcrumb"] a, ' +
-      '[data-automation-id="breadcrumb"] button, [data-automationid="breadcrumb"] [aria-current]'
+    // Read only explicit breadcrumb/heading elements, never arbitrary page
+    // text, document.title or child-frame content. Attribute names support
+    // breadcrumbs whose visible text is abbreviated on a narrow window.
+    const breadcrumbRoots = Array.from(document.querySelectorAll(
+      '.ms-Breadcrumb, [data-automationid="breadcrumb"], [data-automation-id="breadcrumb"], ' +
+      '[aria-label="breadcrumb" i], [aria-label="breadcrumbs" i], ' +
+      '[aria-label="breadcrumb navigation" i], [aria-label="trilha de navegação" i], ' +
+      '[aria-label="caminho de navegação" i]'
     ));
+    const breadcrumbs = Array.from(new Set([
+      ...document.querySelectorAll('.ms-Breadcrumb-itemLink'),
+      ...breadcrumbRoots.flatMap((root) => Array.from(root.querySelectorAll('a, button, [aria-current]')))
+    ]));
+    const currentBreadcrumbs = breadcrumbs.filter((item) =>
+      item.hasAttribute('aria-current') && item.getAttribute('aria-current') !== 'false');
     const headings = Array.from(document.querySelectorAll('h1, h2, [role="heading"]'));
-    return [...breadcrumbs, ...headings]
+    return [...currentBreadcrumbs.reverse(), ...breadcrumbs.reverse(), ...headings]
       .filter((item) => acmaisVisible(item) && !item.closest('#acmais-link-toolbar, #acmais-loading-cover'))
-      .map((item) => (item.textContent || '').trim())
-      .find((text) => /\s-\s/.test(text)) || '';
+      .flatMap((item) => [item.getAttribute('title'), item.getAttribute('aria-label'), item.textContent])
+      .map((text) => (text || '').replace(/\s+/g, ' ').trim())
+      // Keep in sync with NUMERIC_FOLDER_PATTERN / FOLDER_PATTERN in Python.
+      .find((text) => /^(?:[0-9]+\s*-\s*.+|.+?\s+-\s+.+)$/.test(text)) || '';
   };
 """
 
@@ -58,7 +94,9 @@ def navigation_state_script() -> str:
 (() => {{
   {_PAGE_HELPERS}
   const acmaisNavigationSnapshot = {{
-    url: location.href, hasPassword: Boolean(acmaisPasswordInput()), heading: acmaisHeading()
+    url: location.href, hasPassword: Boolean(acmaisPasswordInput()), heading: acmaisHeading(),
+    ready: document.readyState !== 'loading',
+    frameCount: document.querySelectorAll('iframe, frame').length
   }};
   return acmaisNavigationSnapshot;
 }})()
@@ -79,13 +117,17 @@ def _navigation_guard(navigation_token: int | None, phase: str) -> str:
 """
 
 
-def password_submission_script(password: str, allowed_origin: str | None = None, *, navigation_token: int | None = None) -> str:
+def password_submission_script(password: str, allowed_origin: str | None = None, *, navigation_token: int | None = None,
+                               expected_url: str | None = None, include_cover: bool = True) -> str:
     """Build a one-shot script for Microsoft's shared-link password page."""
     secret = json.dumps(password)
     origin_check = f"if (location.origin !== {json.dumps(allowed_origin)}) return false;" if allowed_origin else ""
+    document_check = f"if (location.href !== {json.dumps(expected_url)}) return false;" if expected_url else ""
+    cover = navigation_cover_body('Validando o acesso seguro…', navigation_token=navigation_token) if include_cover else _navigation_guard(navigation_token, 'loading')
     return f"""
 (() => {{
   {origin_check}
+  {document_check}
   {_PAGE_HELPERS}
   const input = acmaisPasswordInput();
   if (!input || input.disabled || input.readOnly) return false;
@@ -98,7 +140,7 @@ def password_submission_script(password: str, allowed_origin: str | None = None,
       allowedButton(item) && /^(continuar|avançar|verificar|entrar|abrir|acessar|continue|next|verify|submit|open|sign in|access)$/i
         .test((item.textContent || item.value || '').trim()));
   if (!button) return false;
-  {navigation_cover_body('Validando o acesso seguro…', navigation_token=navigation_token)}
+  {cover}
   const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
   setter.call(input, {secret});
   input.dispatchEvent(new Event('input', {{ bubbles: true }}));

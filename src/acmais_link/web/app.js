@@ -172,7 +172,7 @@ async function saveCompany(event) {
   const operation = ++state.navigationSeq;
   formError.hidden = true;
   dialog.close("validating");
-  setBusy(true, payload.originalCode ? "Atualizando acesso" : "Validando acesso");
+  setBusy(true);
   await nextPaint();
   if (operation !== state.navigationSeq) return;
   try {

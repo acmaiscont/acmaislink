@@ -18,6 +18,7 @@ from .paths import ensure_data_dirs
 from .single_instance import SingleInstance
 from .runtime import webview_available
 from .window_geometry import initial_window_geometry
+from .navigation_window import NavigationWindow
 
 
 def resource_path(relative: str) -> Path:
@@ -78,7 +79,8 @@ def main() -> None:
         background_color="#F7F8FA",
         text_select=False,
     )
-    api._bind_window(window)
+    api._bind_window(NavigationWindow(window, api.return_home, api.open_current_external, api.open_company)
+                     if sys.platform == 'win32' else window)
     home_document = []
     window.events.initialized += lambda renderer: home_document.append(window.real_url)
     window.events.loaded += api._on_loaded
@@ -93,7 +95,7 @@ def main() -> None:
         # Native lifecycle, independent of which local or SharePoint page is open.
         window.events.shown += updates.start
     logger.info(
-        "Aplicativo iniciado: version=%s executable=%s data_dir=%s",
+        "Aplicativo iniciado: version=%s executable=%s data_dir=%s navigation=webview2-native",
         __version__,
         sys.executable,
         data_dir,

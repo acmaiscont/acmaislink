@@ -1,6 +1,8 @@
 .venv/
 build/
 dist/
+!site-downloads/dist/
+!site-downloads/dist/**
 release/
 release-v0.2.0/
 release-v0.2.1/

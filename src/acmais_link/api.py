@@ -89,9 +89,7 @@ class AppApi:
                 raise ValidationError("Use uma URL HTTPS válida do SharePoint.")
             original_code = str(payload.get("originalCode") or "").strip()
             password = str(payload.get("password") or "")
-            if original_code and not password:
-                password = self._credentials.get(original_code) or ""
-            if not password:
+            if not password and not original_code:
                 raise ValidationError("Informe a senha no primeiro cadastro.")
 
             self._queue_navigation({
@@ -127,18 +125,9 @@ class AppApi:
         try:
             with self._lock:
                 request_token = self._navigation_token
-            company = self._config.get(code)
-            if company is None:
-                raise ValidationError("Empresa não encontrada.")
-            password = self._credentials.get(company.code)
-            if not password:
-                raise CredentialStoreError("A empresa não possui uma senha salva.")
-
             self._queue_navigation({
                 "kind": "open",
-                "url": company.url,
-                "password": password,
-                "company": company,
+                "code": code,
                 "attempts": 0,
             }, expected_token=request_token)
             return {"ok": True}
@@ -176,7 +165,7 @@ class AppApi:
         # Navigate natively to the local document before doing any decoration.
         if not self._is_current(token, "home"):
             return {"ok": True}
-        self._window.load_url(self._home_url)
+        self._load_navigation(self._home_url, token, 'home')
         if self._is_current(token, "home"):
             self._window.show()
         return {"ok": True}
@@ -185,13 +174,33 @@ class AppApi:
         with self._lock:
             return token == self._navigation_token and (mode is None or self._mode == mode)
 
+    def _evaluate_navigation(self, window: Any, script: str, token: int, mode: str):
+        evaluate = getattr(window, 'evaluate_navigation_js', None)
+        if callable(evaluate):
+            return evaluate(script, lambda: self._is_current(token, mode))
+        return window.evaluate_js(script)
+
+    def _load_navigation(self, url: str, token: int, mode: str):
+        navigate = getattr(self._window, 'navigate', None)
+        if callable(navigate):
+            return navigate(url, lambda: self._is_current(token, mode))
+        if self._is_current(token, mode):
+            self._window.load_url(url)
+
     def _on_loaded(self, window: Any) -> None:
+        # Remote DOM reads use the native adapter, not pywebview's late bridge.
+        window = self._window or window
         with self._lock:
             mode = self._mode
             token = self._navigation_token
         if mode == "home":
             if not self._is_current(token, "home"):
                 return
+            show_home = getattr(window, 'show_home', None)
+            if callable(show_home):
+                current = window.get_current_url() or ''
+                if current == self._home_url or urlparse(current).hostname in ('localhost', '127.0.0.1'):
+                    show_home(lambda: self._is_current(token, 'home'))
             window.set_title("ACMAIS LINK")
             window.show()
             return
@@ -236,33 +245,57 @@ class AppApi:
     def _inspect_current_navigation(self, window: Any, token: int, pending: dict) -> None:
 
         try:
-            state = window.evaluate_js(navigation_state_script())
-        except Exception:
+            state = self._evaluate_navigation(window, navigation_state_script(), token, 'navigating')
+        except Exception as exc:
+            pending['ready_checks'] = 0
+            self._navigation_phase(pending, 'document-unavailable', error=type(exc).__name__)
             self._retry_navigation(token)
             return
         if not self._is_current(token, "navigating"):
             return
         if not isinstance(state, dict):
+            pending['ready_checks'] = 0
+            self._navigation_phase(pending, 'document-unavailable')
             self._retry_navigation(token)
             return
         current_url = str(state.get("url") or "")
-        if not current_url or current_url.startswith(("about:", "data:", "file:")):
+        # A company switch can receive a late snapshot from the old folder
+        # while WebView2 is replacing its document. Never save that identity.
+        if (not pending.get('remote_seen') and current_url == pending.get('previous_url')
+                and current_url != pending['url']):
+            self._retry_navigation(token)
+            return
+        if (not current_url or current_url.startswith(("about:", "data:", "file:"))
+                or (urlparse(current_url).hostname in ('127.0.0.1', 'localhost')
+                    and not pending.get('remote_seen'))):
             self._retry_navigation(token)
             return
         if (not is_allowed_sharepoint_url(current_url)
                 or urlparse(current_url).hostname != urlparse(pending["url"]).hostname):
             self._fail_navigation("O SharePoint redirecionou para um endereço não permitido.", token)
             return
-
-        try:
-            window.evaluate_js(navigation_cover_script(navigation_token=token))
-        except Exception:
+        pending['remote_seen'] = True
+        if state.get('ready') is False:
+            pending['ready_checks'] = 0
+            self._navigation_phase(pending, 'document-loading')
             self._retry_navigation(token)
             return
+
+        # On Windows the cover belongs to the window and was shown BEFORE the
+        # navigation. Never put a late overlay over an already visible folder.
+        if not callable(getattr(window, 'show_loading', None)):
+            try:
+                window.evaluate_js(navigation_cover_script(navigation_token=token))
+            except Exception:
+                self._retry_navigation(token)
+                return
 
         if not self._is_current(token, "navigating"):
             return
         if state.get("hasPassword"):
+            pending['ready_checks'] = 0
+            pending['mismatch_checks'] = 0
+            self._navigation_phase(pending, 'password')
             submitted_at = pending.get("submitted_at")
             if submitted_at is not None:
                 if time.monotonic() - submitted_at >= 12:
@@ -277,9 +310,10 @@ class AppApi:
                 return
             try:
                 origin = "https://" + urlparse(pending["url"]).hostname
-                submitted = bool(window.evaluate_js(password_submission_script(
-                    password, origin, navigation_token=token,
-                )))
+                submitted = bool(self._evaluate_navigation(window, password_submission_script(
+                    password, origin, navigation_token=token, expected_url=current_url,
+                    include_cover=not callable(getattr(window, 'show_loading', None)),
+                ), token, 'navigating'))
             except Exception:
                 self._retry_navigation(token)
                 return
@@ -302,8 +336,10 @@ class AppApi:
                 heading = str(state.get("heading") or "")
                 identity = extract_company_identity(current_url, heading)
                 if identity is None:
+                    self._navigation_phase(pending, 'identity-missing')
                     self._retry_navigation(token)
                     return
+                self._navigation_phase(pending, 'saving')
                 code, name = identity
                 company = Company.from_payload({"code": code, "name": name, "url": pending["url"]})
                 if not self._persist_company(company, pending, token):
@@ -311,9 +347,23 @@ class AppApi:
             else:
                 company = pending["company"]
                 heading = str(state.get("heading") or "")
-                if extract_company_identity(current_url, heading) is None:
+                # Match the selected company, including its ancestor when the
+                # session resumes in a numbered subfolder (e.g. 01 - Janeiro).
+                # Never label another company's documents as this one.
+                if extract_company_identity(current_url, heading, expected_code=company.code) is None:
+                    pending['ready_checks'] = 0
+                    if extract_company_identity(current_url, heading) is not None:
+                        pending['mismatch_checks'] = pending.get('mismatch_checks', 0) + 1
+                        self._navigation_phase(pending, 'identity-mismatch')
+                        if pending['mismatch_checks'] >= 5:
+                            self._fail_navigation('A pasta aberta não corresponde à empresa selecionada. Edite o acesso e confira o link.', token)
+                            return
+                    else:
+                        pending['mismatch_checks'] = 0
+                        self._navigation_phase(pending, 'identity-missing')
                     self._retry_navigation(token)
                     return
+                pending['mismatch_checks'] = 0
 
                 # Shared-link pages render their password component asynchronously.
                 # Wait through several clean probes before considering the folder ready.
@@ -404,7 +454,7 @@ class AppApi:
             self._logger.warning("Cadastro salvo; limpeza da credencial antiga pendente")
 
     def _queue_navigation(self, pending: dict[str, Any], *, expected_token: int | None = None,
-                          expected_mode: str | None = None) -> None:
+                          expected_mode: str | None = None, navigate: bool = True) -> None:
         if self._window is None:
             raise RuntimeError("A janela principal não está disponível.")
         with self._lock:
@@ -412,35 +462,101 @@ class AppApi:
                     expected_token != self._navigation_token
                     or (expected_mode is not None and self._mode != expected_mode)):
                 return
-            if self._mode == "navigating":
+            if self._mode in ("preparing", "navigating"):
                 raise ValidationError("Aguarde a abertura atual ou volte para as empresas.")
             self._navigation_token += 1
-            self._mode = "navigating"
-            pending["deadline"] = time.monotonic() + 35
+            # Loaded events and probes must not run until the loading screen
+            # is painted and all pre-navigation preparation has finished.
+            self._mode = "preparing"
+            pending["deadline"] = time.monotonic() + 60
             pending["submitted_at"] = None
             pending["ready_checks"] = 0
             self._pending = pending
             self._current_company = None
             self._probe_scheduled = False
             token = self._navigation_token
-        watchdog = threading.Timer(36, self._navigation_timeout, args=(token,))
+        watchdog = threading.Timer(61, self._navigation_timeout, args=(token,))
         watchdog.daemon = True
         watchdog.start()
-        if not self._is_current(token, "navigating"):
+        if not self._is_current(token, "preparing"):
             return
-        self._window.set_title("ACMAIS LINK - Abrindo documentos...")
-        if not self._is_current(token, "navigating"):
-            return
-        self._window.show()
-        if not self._is_current(token, "navigating"):
-            return
-        self._window.load_url(pending["url"])
+        try:
+            self._window.set_title("ACMAIS LINK - Abrindo documentos...")
+            if not self._is_current(token, "preparing"):
+                return
+            self._window.show()
+            if not self._is_current(token, "preparing"):
+                return
+            show_loading = getattr(self._window, 'show_loading', None)
+            if callable(show_loading):
+                shown = show_loading(lambda: self._is_current(token, 'preparing'))
+            else:
+                shown = self._evaluate_navigation(self._window, navigation_cover_script(
+                    navigation_token=token), token, 'preparing')
+            if not self._is_current(token, 'preparing'):
+                return
+            if shown is not True:
+                raise RuntimeError('Loading screen was not presented')
+            self._navigation_phase(pending, 'preparing')
+            if not self._prepare_navigation(pending, token):
+                return
+            if navigate:
+                pending['previous_url'] = self._window.get_current_url() or ''
+                self._load_navigation(pending['url'], token, 'preparing')
+            with self._lock:
+                if not self._is_current(token, 'preparing'):
+                    return
+                self._mode = 'navigating'
+            self._navigation_phase(pending, 'connecting')
+            # Poll from the start, including redirects that never fire loaded.
+            self._retry_navigation(token)
+        except Exception as exc:
+            message = self._error(exc)['error'] if isinstance(exc, (ValidationError, CredentialStoreError)) else (
+                'Não foi possível iniciar a abertura da pasta. Tente novamente.')
+            self._fail_navigation(message, token)
+            raise
+
+    def _prepare_navigation(self, pending: dict, token: int) -> bool:
+        # Credential Manager/disk may be slow. They run only after the cover
+        # acknowledges its paint, without holding the cancellation/state lock.
+        if pending['kind'] == 'open':
+            company = pending.get('company') or self._config.get(pending['code'])
+            if not self._is_current(token, 'preparing'):
+                return False
+            if company is None:
+                raise ValidationError('Empresa não encontrada.')
+            pending['company'] = company
+            pending.setdefault('url', company.url)
+            pending['password'] = self._credentials.get(company.code) or ''
+            missing = CredentialStoreError('A empresa não possui uma senha salva.')
+        else:
+            if not pending.get('password'):
+                pending['password'] = self._credentials.get(pending['original_code']) or ''
+            missing = ValidationError('Informe a senha no primeiro cadastro.')
+        if not self._is_current(token, 'preparing'):
+            return False
+        if not pending['password']:
+            raise missing
+        return True
+
+    def _navigation_phase(self, pending: dict, phase: str, *, error: str = '') -> None:
+        if pending.get('phase') != phase:
+            pending['phase'] = phase
+            # No sharing URLs, page contents or passwords in diagnostics.
+            self._logger.info('Navegação: kind=%s phase=%s error=%s', pending['kind'], phase, error)
+
+    @staticmethod
+    def _timeout_message(pending: dict) -> str:
+        if pending.get('phase') == 'identity-missing' and pending['kind'] == 'setup':
+            return 'Não foi possível identificar a pasta. Confirme se o nome segue código - nome da empresa.'
+        return 'O SharePoint demorou demais para responder. Verifique sua conexão e tente novamente.'
 
     def _navigation_timeout(self, token: int) -> None:
         with self._lock:
-            if token != self._navigation_token or self._mode != "navigating":
+            if token != self._navigation_token or self._mode not in ("preparing", "navigating"):
                 return
-        self._fail_navigation("O SharePoint demorou demais para responder. Verifique sua conexão e tente novamente.", token)
+            message = self._timeout_message(self._pending or {})
+        self._fail_navigation(message, token)
 
     def _retry_navigation(self, token: int) -> None:
         with self._lock:
@@ -450,11 +566,7 @@ class AppApi:
             if not pending:
                 return
             if time.monotonic() >= pending["deadline"]:
-                message = (
-                    "Não foi possível identificar a pasta. Confirme se o nome segue código - nome da empresa."
-                    if pending["kind"] == "setup"
-                    else "O SharePoint demorou demais para abrir. Tente novamente."
-                )
+                message = self._timeout_message(pending)
             else:
                 message = None
             if message is None and self._probe_scheduled:
@@ -478,7 +590,7 @@ class AppApi:
         if company is None:
             return
         try:
-            state = window.evaluate_js(navigation_state_script())
+            state = self._evaluate_navigation(window, navigation_state_script(), token, 'active')
             if not self._is_current(token, "active") or not isinstance(state, dict):
                 return
             current_url = str(state.get("url") or "")
@@ -487,14 +599,12 @@ class AppApi:
                 self._fail_navigation("A navegação saiu do domínio SharePoint da empresa.", token)
                 return
             if state.get("hasPassword"):
-                password = self._credentials.get(company.code) or ""
                 self._queue_navigation({
                     "kind": "open",
                     "url": current_url,
-                    "password": password,
                     "company": company,
                     "attempts": 0,
-                }, expected_token=token, expected_mode="active")
+                }, expected_token=token, expected_mode="active", navigate=False)
                 return
             self._show_company(window, company, token)
         except Exception:
@@ -505,9 +615,17 @@ class AppApi:
         if not self._is_current(token, "active"):
             return False
         try:
-            shown = window.evaluate_js(navigation_toolbar_script(
-                f"{company.code} - {company.name}", navigation_token=token,
-            ))
+            show_folder = getattr(window, 'show_folder', None)
+            if callable(show_folder):
+                set_choices = getattr(window, 'set_company_choices', None)
+                if callable(set_choices):
+                    choices = [{'code': item.code, 'name': item.name} for item in self._config.list()]
+                    set_choices(choices, company.code, lambda: self._is_current(token, 'active'))
+                shown = show_folder(f'{company.code} - {company.name}', lambda: self._is_current(token, 'active'))
+            else:
+                shown = window.evaluate_js(navigation_toolbar_script(
+                    f"{company.code} - {company.name}", navigation_token=token,
+                ))
             if not self._is_current(token, "active"):
                 return False
             if shown is not True:
@@ -533,7 +651,7 @@ class AppApi:
             self._notice = {"message": message, "error": True}
         self._logger.warning("Navegação interrompida: %s", message)
         if self._window and self._is_current(home_token, "home"):
-            self._window.load_url(self._home_url)
+            self._load_navigation(self._home_url, home_token, 'home')
             if self._is_current(home_token, "home"):
                 self._window.show()
 

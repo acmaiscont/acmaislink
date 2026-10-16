@@ -322,6 +322,193 @@ class NavigationRaceTests(unittest.TestCase):
         self.assertEqual(self.api._mode, "home")
         self.assertIsNone(self.api._pending)
 
+    def test_native_cover_precedes_navigation_and_polling_starts_without_loaded(self):
+        actions = []
+        self.window.show_loading = lambda current: (actions.append(('loading', current())), True)[1]
+        original_load = self.window.load_url
+        self.window.load_url = lambda url: (actions.append(('navigate', True)), original_load(url))
+        with patch.object(self.api, '_retry_navigation') as retry:
+            token = self.begin()
+        self.assertEqual(actions, [('loading', True), ('navigate', True)])
+        retry.assert_called_once_with(token)
+
+    def test_native_folder_controls_do_not_depend_on_remote_toolbar(self):
+        self.window.show_loading = lambda current: True
+        token = self.begin()
+        self.window.show_folder = lambda label, current: current()
+        self.window.toolbar_result = RuntimeError('pywebview bridge never initialized')
+        self.api._inspect_navigation(self.window, token)
+        self.assertEqual(self.api._mode, 'active')
+        self.assertIsNotNone(self.config.get('0000'))
+        self.assertFalse(self.window.cover)
+
+    def test_loading_document_is_not_persisted_until_dom_ready(self):
+        token = self.begin()
+        evaluate = self.window.evaluate_js
+        self.window.evaluate_js = lambda script: {**evaluate(script), 'ready': False}
+        self.api._inspect_navigation(self.window, token)
+        self.assertEqual(self.config.list(), [])
+        self.assertEqual(self.api._mode, 'navigating')
+        self.window.evaluate_js = evaluate
+        self.api._inspect_navigation(self.window, token)
+        self.assertEqual(self.api._mode, 'active')
+
+    def test_local_document_before_remote_navigation_is_not_a_redirect_error(self):
+        token = self.begin()
+        self.window.url = 'http://127.0.0.1:45678/index.html'
+        self.api._inspect_navigation(self.window, token)
+        self.assertEqual(self.api._mode, 'navigating')
+        self.assertIsNone(self.api._notice)
+
+    def test_unavailable_bridge_does_not_blame_the_folder_name(self):
+        token = self.begin()
+        self.window.evaluate_js = lambda script: None
+        self.api._inspect_navigation(self.window, token)
+        self.api._navigation_timeout(token)
+        self.assertNotIn('nome', self.api._notice['message'])
+        self.assertIn('demorou', self.api._notice['message'])
+
+    def test_existing_authentication_page_is_not_reloaded(self):
+        token = self.begin()
+        self.api._inspect_navigation(self.window, token)
+        self.assertEqual(self.api._mode, 'active')
+        self.window.password_page = True
+        with patch.object(self.window, 'load_url') as load:
+            self.api._on_loaded(self.window)
+        self.assertEqual(self.api._mode, 'navigating')
+        load.assert_not_called()
+
+    def test_loaded_handler_keeps_native_adapter(self):
+        token = self.begin()
+        with patch.object(self.api, '_inspect_navigation') as inspect:
+            self.api._on_loaded(object())
+        inspect.assert_called_once_with(self.window, token)
+
+    def test_queued_loads_for_remote_home_and_errors_keep_generation_guard(self):
+        queued = []
+        self.window.navigate = lambda url, current: queued.append((url, current))
+        token = self.begin()
+        self.api._fail_navigation('test error', token)
+        self.begin()
+        self.api.return_home()
+        self.assertEqual(len(queued), 4)
+        # Simulate a busy UI finally receiving all callbacks. Only the latest
+        # return home is allowed, even if an old remote callback arrives last.
+        calls = [url for url, current in reversed(queued) if current()]
+        self.assertEqual(calls, ['file:///home/index.html'])
+
+    def test_loading_must_be_acknowledged_before_credentials_or_remote_navigation(self):
+        self.config.upsert(Company('150', 'Empresa', 'https://tenant.sharepoint.com/150'))
+        for acknowledged in (False, None):
+            with self.subTest(acknowledged=acknowledged):
+                self.window.show_loading = lambda current: acknowledged
+                with patch.object(self.credentials, 'get') as credential, patch.object(self.window, 'load_url') as load:
+                    self.assertFalse(self.api.open_company('150')['ok'])
+                credential.assert_not_called()
+                self.assertEqual([call.args[0] for call in load.call_args_list], ['file:///home/index.html'])
+                self.assertEqual(self.api._mode, 'home')
+
+    def test_loading_precedes_disk_and_credential_reads_and_loaded_is_ignored_during_preparation(self):
+        self.config.upsert(Company('150', 'Empresa', 'https://tenant.sharepoint.com/150'))
+        self.credentials.set('150', 'saved-secret')
+        actions = []
+        original_get, original_load = self.config.get, self.window.load_url
+
+        def loading(current):
+            actions.append('paint')
+            self.assertTrue(current())
+            self.assertEqual(self.api._mode, 'preparing')
+            self.api._on_loaded(self.window)
+            self.assertFalse(self.api.open_company('150')['ok'])
+            return True
+
+        self.window.show_loading = loading
+        with patch.object(self.api, '_inspect_navigation') as inspect, \
+                patch.object(self.config, 'get', side_effect=lambda code: (actions.append('disk'), original_get(code))[1]), \
+                patch.object(self.credentials, 'get', side_effect=lambda code: (actions.append('credential'), 'saved-secret')[1]), \
+                patch.object(self.window, 'load_url', side_effect=lambda url: (actions.append('navigate'), original_load(url))[1]):
+            self.assertTrue(self.api.open_company('150')['ok'])
+        inspect.assert_not_called()
+        self.assertEqual(actions, ['paint', 'disk', 'credential', 'navigate'])
+        self.assertEqual(self.api._mode, 'navigating')
+
+    def test_cancel_during_paint_does_not_read_credentials_or_navigate(self):
+        def paint_then_cancel(current):
+            self.api.return_home()
+            return current()
+        self.window.show_loading = paint_then_cancel
+        with patch.object(self.credentials, 'get') as credential:
+            self.assertTrue(self.api.open_company('150')['ok'])
+        credential.assert_not_called()
+        self.assertEqual(self.api._mode, 'home')
+        self.assertEqual(self.window.url, 'file:///home/index.html')
+
+    def test_preparation_watchdog_prevents_late_credential_completion_from_navigating(self):
+        self.config.upsert(Company('150', 'Empresa', 'https://tenant.sharepoint.com/150'))
+        def timeout_during_read(code):
+            self.assertEqual(self.api._mode, 'preparing')
+            self.api._navigation_timeout(self.api._navigation_token)
+            return 'saved-secret'
+        self.window.show_loading = lambda current: True
+        with patch.object(self.credentials, 'get', side_effect=timeout_during_read):
+            self.assertTrue(self.api.open_company('150')['ok'])
+        self.assertEqual(self.api._mode, 'home')
+        self.assertEqual(self.window.url, 'file:///home/index.html')
+
+    def test_old_company_document_is_not_saved_during_company_switch(self):
+        previous_url = 'https://tenant.sharepoint.com/old-company'
+        self.window.url = previous_url
+        token = self.begin()
+        self.window.url = previous_url
+        self.api._inspect_navigation(self.window, token)
+        self.assertEqual(self.config.list(), [])
+        self.assertEqual(self.api._mode, 'navigating')
+        self.window.url = 'https://tenant.sharepoint.com/new-folder'
+        self.api._inspect_navigation(self.window, token)
+        self.assertEqual(self.api._mode, 'active')
+
+    def test_unspaced_company_is_saved_and_selector_receives_only_code_and_name(self):
+        token = self.begin()
+        self.window.url = 'https://tenant.sharepoint.com/share'
+        self.window.before_heading = lambda: '150-EMPRESA EXEMPLO DE SERVICOS LTDA'
+        choices = []
+        self.window.set_company_choices = lambda items, code, current: choices.append((items, code, current()))
+        self.window.show_folder = lambda label, current: current()
+        self.api._inspect_navigation(self.window, token)
+        self.assertEqual(self.config.get('150').name, 'EMPRESA EXEMPLO DE SERVICOS LTDA')
+        self.assertEqual(choices, [([{'code': '150', 'name': 'EMPRESA EXEMPLO DE SERVICOS LTDA'}], '150', True)])
+        self.assertEqual(self.credentials.get('150'), 'test-only')
+
+    def test_switch_does_not_label_another_company_folder_as_selected_company(self):
+        company = Company('150', 'Empresa', 'https://tenant.sharepoint.com/150')
+        self.config.upsert(company)
+        self.credentials.set('150', 'saved-secret')
+        self.assertTrue(self.api.open_company('150')['ok'])
+        token = self.api._navigation_token
+        self.window.url = 'https://tenant.sharepoint.com/different-folder'
+        # The fake snapshot reports company 0000 instead of requested 150.
+        for _ in range(5):
+            self.api._inspect_navigation(self.window, token)
+        self.assertEqual(self.api._mode, 'home')
+        self.assertIn('não corresponde', self.api._notice['message'])
+        self.assertFalse(self.window.toolbar)
+        self.assertEqual(self.config.get('150'), company)
+        self.assertEqual(self.credentials.get('150'), 'saved-secret')
+
+    def test_matching_company_can_recover_after_transient_wrong_snapshot(self):
+        self.config.upsert(Company('150', 'Empresa', 'https://tenant.sharepoint.com/150'))
+        self.credentials.set('150', 'saved-secret')
+        self.api.open_company('150')
+        token = self.api._navigation_token
+        self.window.url = 'https://tenant.sharepoint.com/redirect'
+        self.api._inspect_navigation(self.window, token)
+        self.assertEqual(self.api._mode, 'navigating')
+        for _ in range(5):
+            self.window.before_heading = lambda: '150-Empresa'
+            self.api._inspect_navigation(self.window, token)
+        self.assertEqual(self.api._mode, 'active')
+        self.assertEqual(self.api._current_company.code, '150')
+
 
 if __name__ == "__main__":
     unittest.main()

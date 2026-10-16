@@ -151,7 +151,42 @@ novo teste do link real nem substituição da instalação em uso nesta revisão
 A versão continua 1.0.0: o candidato corrigido deve ser reinstalado manualmente
 para substituir outra edição 1.0.0; atualização automática exige versão maior.
 
-### Homologações pendentes
+### Revisão complementar — 18/09/2026
+
+O teste real encontrou leituras vazias na transição do SharePoint enquanto a
+ponte JavaScript ainda não estava pronta. A versão Windows agora consulta o DOM
+diretamente pelo WebView2, com espera limitada. A cobertura aparece antes de
+navegar, pertence à própria janela e é removida ao concluir. A barra nativa
+reserva espaço acima da página, sem depender de scripts remotos.
+
+Navegações enfileiradas validam a operação na thread UI: cancelar impede uma
+carga antiga de reabrir o link. Uma página que voltou a pedir autenticação é
+tratada no documento atual, sem recarregar o endereço.
+
+Foram aprovados 103 testes Python e 23 cenários de DOM. O link real de exemplo
+foi cadastrado e reaberto em um executável de QA compilado com os módulos do
+aplicativo; a senha foi gravada/lida no cofre Windows em um serviço temporário.
+A inspeção visual conferiu cobertura, retorno, cancelamento e cadastro salvo.
+Os perfis de teste são isolados; a instalação principal não foi substituída.
+A versão permanece 1.0.0, exigindo reinstalação manual deste candidato para
+substituir outra edição com o mesmo número. Nenhuma Release foi publicada.
+
+### Homologações ainda pendentes
+
+Em 13/10/2026, a revalidação aprovou 134 testes Python e 50 cenários de navegador.
+O executável de QA concluiu cadastro e reabertura da pasta de exemplo, com os
+mesmos módulos de navegação da distribuição. A barra e a lista de empresas
+foram inspecionadas na janela real. Foi adicionada a conferência do código ao
+abrir uma empresa existente, impedindo rotular a pasta de outra empresa como a
+selecionada. A versão segue 1.0.0, sem publicação de Release.
+
+Revisão de fluxo e menu (18/09): a preparação agora confirma a pintura antes de
+ler credenciais/navegar, e eventos antigos não antecipam a conclusão. A barra
+Windows ganhou seletor de empresas e botões compactos. O link informado da
+empresa 150 revelou um nome sem espaços no hífen, não apenas a quebra de linha
+relatada; a regra passou a aceitar esse formato para códigos numéricos. Não
+houve tentativa de adivinhar sua senha. O teste real autenticado continua
+limitado à pasta de exemplo; a empresa 150 requer homologação pelo proprietário.
 
 - Aprovação do proprietário sobre este candidato e suas alterações.
 - Instalação do pacote completo em VM Windows x64 sem WebView2.

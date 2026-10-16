@@ -60,3 +60,55 @@ fictícias, sem acesso aos documentos dos clientes. Resultados locais ficam em
 
 Esses testes não substituem a homologação da nova edição instalada com o link
 real do cliente nem o teste de atualização entre duas Releases.
+
+### Leitura nativa do WebView2 — revisão complementar de 17/09
+
+- 103 testes Python e 23 cenários de DOM aprovados (revalidação em 18/09).
+- Regressões adicionais: ponte JavaScript ausente, tarefa nativa sem resposta,
+  descarte de ação expirada/cancelada, cobertura antes de navegar, início das
+  consultas sem `loaded`, controles nativos após sucesso e autenticação sem
+  recarregar o link.
+- Cancelamento no intervalo entre enfileirar e executar a navegação: a URL
+  antiga não pode substituir a home nem uma operação mais recente. A guarda
+  também protege o retorno por erro e é conferida na thread da janela.
+- No teste real do link de exemplo, o fluxo anterior retornou snapshots vazios
+  durante a transição mesmo com navegação em andamento. O novo fluxo concluiu
+  cadastro e reabertura com leitura direta do WebView2 e senha no cofre Windows.
+- Os testes reais usam perfil e nome de serviço de credenciais exclusivos de QA;
+  nenhuma empresa da instalação em uso é alterada. As credenciais temporárias
+  são removidas ao encerrar o teste.
+- Nenhum documento foi enviado, alterado, excluído ou baixado.
+
+### Fluxo e seletor — 18/09/2026
+
+- Regressões Python cobrem confirmação positiva da pintura antes de disco/cofre,
+  eventos `loaded` durante preparação, cancelamento/timeout durante leitura,
+  bloqueio de cliques concorrentes e descarte do documento da empresa anterior.
+- `node scripts/test-opening-flow.cjs --report`: 13 cenários no Edge com rede
+  interceptada; abertura/cadastro/edição usam “Abrindo documentos”, aguardam dois
+  quadros, permitem cancelar antes da chamada e recuperam falhas do backend.
+- `node scripts/test-sharepoint-dom.cjs --report`: 37 cenários, incluindo
+  breadcrumbs semânticos, atributos de títulos e códigos numéricos sem espaços.
+- O link real de uma empresa usa o padrão `150-NOME DA EMPRESA`, sem espaços
+  ao redor do hífen; não foi enviada senha a esse link. O nome sem espaços foi
+  reproduzido em regressão de extração e de persistência. A autenticação real da
+  empresa 150 continua pendente por usar uma senha diferente.
+- O marcador do nome na página de senha não é promovido a comprovação de pasta
+  aberta. Nenhum teste modifica documentos do SharePoint.
+
+### Revalidação do candidato — 13/10/2026
+
+- 134 testes Python, 37 de DOM SharePoint e 13 do fluxo local aprovados.
+- Ao abrir cadastro existente, uma pasta de outra empresa não é aceita apenas
+  por estar no mesmo tenant. A identificação deve corresponder ao código
+  selecionado; subpastas numeradas podem usar o ancestral da própria empresa.
+- O executável isolado concluiu cadastro, persistência da senha no cofre e
+  reabertura do link de exemplo. Os módulos de navegação compilados de QA e da
+  distribuição foram comparados e são idênticos.
+- Inspeção com controle de interface: barra compacta acima do SharePoint e
+  lista do seletor nativo renderizadas corretamente. A instalação em uso não
+  foi alterada. O acesso autenticado da empresa 150 ainda requer homologação.
+- Clique real em “Abrir documentos”: feedback exibido, pasta aberta e cobertura
+  removida. Selecionar a empresa já aberta não reiniciou a navegação; retorno à
+  lista manteve o cadastro. Pacotes completos e de atualização gerados em
+  `artifacts/validacao-2026-10-13-fluxo/`, com SHA-256 conferido.

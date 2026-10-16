@@ -1,6 +1,6 @@
-# Candidato 1.0.0 — aguardando aprovação
+# ACMAIS LINK 1.0.0 — publicação aprovada
 
-Nenhuma versão foi publicada. O repositório de distribuição é
+O proprietário aprovou a publicação da versão 1.0.0. O repositório de distribuição é
 https://github.com/acmaiscont/acmaislink. O aplicativo consulta apenas Releases
 públicas estáveis; branches, drafts e pré-lançamentos não são instalados.
 
@@ -74,6 +74,16 @@ Se o OneDrive produzir cópias de conflito, reconcilie-as antes de compilar.
 
 ## Após aprovação do proprietário
 
+A aprovação foi recebida em 15/10/2026. O lançamento usa os módulos aprovados
+no candidato de 13/10; nomes reais de clientes nas fixtures foram substituídos
+por dados fictícios antes do commit público, sem alterar o comportamento do app.
+Os instaladores publicados são exatamente os aprovados em
+`artifacts/validacao-2026-10-13-fluxo/`, sem trocar o runtime durante a publicação.
+SHA-256 completo: `93bce5c993939e1b9aef4f5903cae6efcb18765cc39eecb9d034b9242e8f2d44`.
+SHA-256 leve: `3974aab219b037a29181e882b60489da1b5b2e3b1f05d158d37aa3aca0b8c681`.
+A página estática de downloads fica em `site-downloads/dist/`, pronta para
+integração no site atual; sua criação não altera hospedagem nem DNS.
+
 1. Revisar código e documentos; enviar apenas arquivos versionados para `main`.
 2. Validar o pacote completo em VM Windows sem WebView2 e o leve em VM com WebView2.
 3. Testar atualização real de 1.0.0 para uma versão posterior em ambiente de teste:
@@ -91,8 +101,9 @@ Se o OneDrive produzir cópias de conflito, reconcilie-as antes de compilar.
 
 A máquina de desenvolvimento já possui WebView2. Não remover o runtime compartilhado
 para simular ausência. O caminho de ausência é verificado por testes e revisão,
-mas instalação offline em Windows limpo exige a VM acima. Não há Release pública
-para validar download e instalação de uma atualização real antes da aprovação.
+mas instalação offline em Windows limpo exige a VM acima. Antes da aprovação,
+não havia Release pública para validar uma atualização real. A primeira Release
+não testa a migração entre versões; essa homologação requer uma versão posterior.
 
 Referências: [modo silencioso NSIS](https://nsis.sourceforge.io/Docs/Chapter3.html)
 e [ciclo de execução pywebview](https://pywebview.flowrl.com/guide/usage).

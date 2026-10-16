@@ -63,6 +63,8 @@ class FakeWindow:
         if "const bar = document.createElement" in script:
             self.toolbar = True
             return True
+        if "const acmaisCover = document.createElement" in script:
+            return True
         return None
 
 
