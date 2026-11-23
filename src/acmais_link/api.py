@@ -13,7 +13,11 @@ from urllib.parse import parse_qs, urlparse
 from . import APP_DISPLAY_TITLE
 from .config_store import ConfigStore
 from .credential_store import CredentialStore, CredentialStoreError
-from .delivery import CATALOG, DeliveryItem, DeliveryOutcome, DeliveryRoute, delivery_selection, library_destination, previous_period, suggest_delivery
+from .delivery import (
+    CATALOG, DeliveryItem, DeliveryOutcome, DeliveryRoute, delivery_selection,
+    group_identity, library_destination, library_folder_path, library_folder_url,
+    previous_period, suggest_delivery,
+)
 from .delivery_transport import SharePointDelivery, UNCONFIRMED
 from .models import Company, ValidationError, is_allowed_sharepoint_url
 from .web_home import is_home_document
@@ -226,7 +230,11 @@ class AppApi:
                 original = self._config.get(code)
                 removed = self._config.delete(code)
                 try:
-                    self._credentials.delete(code)
+                    key = original.credential_key if original else code
+                    if not original or not original.group_code or not any(
+                        item.group_code == original.group_code for item in self._config.list()
+                    ):
+                        self._credentials.delete(key)
                 except Exception:
                     if original is not None:
                         self._config.upsert(original)
@@ -427,7 +435,7 @@ class AppApi:
                 return
             password = pending.get("password") or ""
             if not password and pending.get("company"):
-                password = self._credentials.get(pending["company"].code) or ""
+                password = self._credentials.get(pending["company"].credential_key) or ""
             if not self._is_current(token, "navigating"):
                 return
             try:
@@ -455,6 +463,11 @@ class AppApi:
 
         try:
             if pending["kind"] == "setup":
+                folder = library_folder_path(current_url)
+                group_code = group_identity(folder)
+                if group_code:
+                    self._import_group(window, current_url, folder, group_code, pending, token)
+                    return
                 heading = str(state.get("heading") or "")
                 identity = extract_company_identity(current_url, heading)
                 if identity is None:
@@ -468,6 +481,8 @@ class AppApi:
                     return
             else:
                 company = pending["company"]
+                if company.group_code and not self._enter_group_company(company, current_url, pending, token):
+                    return
                 heading = str(state.get("heading") or "")
                 # Match the selected company, including its ancestor when the
                 # session resumes in a numbered subfolder (e.g. 01 - Janeiro).
@@ -512,11 +527,88 @@ class AppApi:
                 self._logger.exception("Falha ao concluir navegação")
                 self._fail_navigation(self._error(exc)["error"], token)
 
+    def _import_group(self, window, current_url, folder, group_code, pending, token):
+        self._navigation_phase(pending, "listing-group")
+        current = lambda: self._is_current(token, "navigating")
+        with SharePointDelivery(current_url, folder,
+                                lambda url: window.delivery_cookies(url, current), current) as transport:
+            names = transport.list_subfolders()
+        members = []
+        codes = set()
+        skipped = 0
+        for name in names:
+            identity = (extract_company_identity("", name) if name not in ("", ".", "..")
+                        and "/" not in name and "\\" not in name and all(ord(char) >= 32 for char in name) else None)
+            if not identity or not identity[0].isascii() or not identity[0].isdecimal():
+                skipped += 1
+                continue
+            code, company_name = identity
+            if code in codes:
+                raise ValidationError(f"O grupo tem duas pastas com o código {code}. Confira os nomes no SharePoint.")
+            codes.add(code)
+            members.append(Company.from_payload({
+                "code": code, "name": company_name, "url": pending["url"], "group_code": group_code,
+                "folder_url": library_folder_url(current_url, folder + "/" + name),
+            }))
+        if not members:
+            raise ValidationError("O grupo não tem subpastas no padrão código - nome da empresa.")
+        with self._persistence_lock:
+            if not current():
+                return
+            for company in self._config.list():
+                if company.group_code != group_code:
+                    continue
+                previous = library_folder_path(company.folder_url)
+                same_tenant = urlparse(company.folder_url).hostname == urlparse(current_url).hostname
+                if not previous or previous.rsplit("/", 1)[0].casefold() != folder.casefold() or not same_tenant:
+                    raise ValidationError("Já existe um grupo com esse código em outra pasta.")
+            key = members[0].credential_key
+            previous_password = self._credentials.get(key)
+            self._credentials.set(key, pending["password"])
+            committed = False
+            try:
+                with self._lock:
+                    if not current():
+                        return
+                    imported, conflicts = self._config.replace_group(group_code, members)
+                    committed = True
+                    message = f"Grupo {group_code} cadastrado. Empresas disponíveis: {imported}."
+                    if conflicts:
+                        message += f" Cadastros de outro acesso preservados: {conflicts}."
+                    if skipped:
+                        message += f" Subpastas sem o padrão de empresa: {skipped}."
+                    self._notice = {"message": message, "error": False}
+            finally:
+                if not committed:
+                    if previous_password is None:
+                        self._credentials.delete(key)
+                    else:
+                        self._credentials.set(key, previous_password)
+        self._return_home(expected_token=token)
+
+    def _enter_group_company(self, company, current_url, pending, token):
+        target, opened = library_folder_path(company.folder_url), library_folder_path(current_url)
+        if target and opened:
+            destination_url, current = urlparse(company.folder_url), urlparse(current_url)
+            same_library = (destination_url.hostname == current.hostname
+                            and destination_url.path.casefold() == current.path.casefold())
+            if same_library:
+                target_key, opened_key = target.casefold(), opened.casefold()
+                # The authenticated group link must resolve to the stored group or the exact child.
+                if opened_key == target_key or opened_key.startswith(target_key + "/"):
+                    return True
+                if opened_key == target_key.rsplit("/", 1)[0] and not pending.get("group_redirected"):
+                    pending["group_redirected"] = True
+                    pending["ready_checks"] = 0
+                    self._load_navigation(company.folder_url, token, "navigating")
+        self._retry_navigation(token)
+        return False
+
     def _continue_delivery(self, window, company, current_url, pending, token):
         if "destination" not in pending:
             current = lambda: self._is_current(token, "navigating")
             route = pending["delivery"]
-            canonical = library_destination(current_url, company.code, route)
+            canonical = library_destination(current_url, company.code, route, company_folder=company.folder_url)
             if canonical is None:
                 raise ValidationError("Não foi possível localizar a raiz da empresa no SharePoint.")
             destination, destination_url = canonical
@@ -771,11 +863,13 @@ class AppApi:
                 raise ValidationError('Empresa não encontrada.')
             pending['company'] = company
             pending.setdefault('url', company.url)
-            pending['password'] = self._credentials.get(company.code) or ''
+            pending['password'] = self._credentials.get(company.credential_key) or ''
             missing = CredentialStoreError('A empresa não possui uma senha salva.')
         else:
             if not pending.get('password'):
-                pending['password'] = self._credentials.get(pending['original_code']) or ''
+                original = self._config.get(pending['original_code'])
+                key = original.credential_key if original else pending['original_code']
+                pending['password'] = self._credentials.get(key) or ''
             missing = ValidationError('Informe a senha no primeiro cadastro.')
         if not self._is_current(token, 'preparing'):
             return False

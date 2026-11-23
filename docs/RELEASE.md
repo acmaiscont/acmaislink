@@ -2,15 +2,15 @@
 
 O repositório de distribuição é https://github.com/acmaiscont/acmaislink.
 O aplicativo consulta apenas Releases públicas estáveis.
-A atualização pública de 1.0.0 é diretamente para 1.1.0. Os instaladores de
+A atualização pública de 1.1.0 é diretamente para 1.1.1. Os instaladores de
 homologação com perfil separado não fazem parte da distribuição.
 
 ## Pacotes
 
 | Arquivo | Uso |
 | --- | --- |
-| ACMAIS-LINK-1.1.0-x64-full.exe | Primeira instalação. Inclui o instalador offline do Microsoft WebView2. |
-| ACMAIS-LINK-1.1.0-x64-update.exe | Instalação leve ou atualização. Exige WebView2 já instalado. |
+| ACMAIS-LINK-1.1.1-x64-full.exe | Primeira instalação. Inclui o instalador offline do Microsoft WebView2. |
+| ACMAIS-LINK-1.1.1-x64-update.exe | Instalação leve ou atualização. Exige WebView2 já instalado. |
 
 Windows 10/11 x64. Instalação por usuário em `%LOCALAPPDATA%\Programs\ACMAIS LINK`.
 Atalhos na área de trabalho e menu Iniciar. Na instalação manual, o assistente
@@ -78,7 +78,7 @@ integração no site atual; sua criação não altera hospedagem nem DNS.
 
 1. Revisar código e documentos; enviar apenas arquivos versionados para `main`.
 2. Validar o pacote completo em VM Windows sem WebView2 e o leve em VM com WebView2.
-3. Testar atualização real de 1.0.0 para uma versão posterior em ambiente de teste:
+3. Testar atualização real de 1.1.0 para uma versão posterior em ambiente de teste:
    download sem prompts, uso de documentos preservado, aplicação silenciosa ao
    fechar e próxima abertura na nova versão. Não publicar uma Release de teste
    como estável no repositório de produção: todos os clientes instalados consultarão esse canal.

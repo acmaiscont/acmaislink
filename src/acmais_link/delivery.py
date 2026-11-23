@@ -65,8 +65,8 @@ class DeliveryRoute:
     def segments(self):
         return self.year, f"{self.month:02}-{self.year}", self.sector, self.kind
 
-def company_root_from_library_url(url: str, company_code: str) -> str | None:
-    """Read the company root from a resolved library view, never from the share token."""
+def library_folder_path(url: str) -> str | None:
+    """Read a folder from a resolved library view, never from a share token."""
     if not is_allowed_sharepoint_url(url):
         return None
     parsed = urlsplit(url)
@@ -80,7 +80,22 @@ def company_root_from_library_url(url: str, company_code: str) -> str | None:
     parts = path[1:].split("/")
     if any(not part or part in (".", "..") or any(ord(ch) < 32 for ch in part) for part in parts):
         return None
+    return path
+
+
+def library_folder_url(url: str, folder: str) -> str:
+    parsed = urlsplit(url)
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode({"id": folder}), ""))
+
+
+def company_root_from_library_url(url: str, company_code: str) -> str | None:
+    path = library_folder_path(url)
+    if path is None:
+        return None
+    parsed = urlsplit(url)
+    library = unquote(parsed.path[:-len("/Forms/AllItems.aspx")])
     library_depth = len(library[1:].split("/"))
+    parts = path[1:].split("/")
     for index in range(library_depth, len(parts)):
         part = parts[index]
         if extract_company_identity("", part, expected_code=company_code):
@@ -88,13 +103,23 @@ def company_root_from_library_url(url: str, company_code: str) -> str | None:
     return None
 
 
-def library_destination(url: str, company_code: str, route: DeliveryRoute) -> tuple[str, str] | None:
-    root = company_root_from_library_url(url, company_code)
+def library_destination(url: str, company_code: str, route: DeliveryRoute, *, company_folder="") -> tuple[str, str] | None:
+    root = library_folder_path(company_folder) if company_folder else company_root_from_library_url(url, company_code)
     if root is None:
         return None
-    parsed = urlsplit(url)
     destination = "/".join((root, *route.segments))
-    return destination, urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode({"id": destination}), ""))
+    return destination, library_folder_url(company_folder or url, destination)
+
+
+def group_identity(path: str | None):
+    if not path:
+        return None
+    segments = path.split("/")
+    if len(segments) >= 3 and segments[-2].casefold() == "grupo":
+        match = re.fullmatch(r"([0-9]{5})\s+-\s+\S.*", segments[-1])
+        if match:
+            return match[1]
+    return None
 
 
 class _XmlRootFound(Exception):

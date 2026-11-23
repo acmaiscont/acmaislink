@@ -31,6 +31,12 @@ class Company:
     code: str
     name: str
     url: str
+    group_code: str = ""
+    folder_url: str = ""
+
+    @property
+    def credential_key(self) -> str:
+        return f"grupo:{self.group_code}" if self.group_code else self.code
 
     @classmethod
     def from_payload(cls, payload: dict) -> "Company":
@@ -50,7 +56,15 @@ class Company:
         if not is_allowed_sharepoint_url(url):
             raise ValidationError("Use uma URL HTTPS válida do SharePoint.")
 
-        return cls(code=code, name=name, url=url)
+        group = payload.get("group_code", "")
+        folder = payload.get("folder_url", "")
+        if group or folder:
+            if (not isinstance(group, str) or len(group) != 5 or not group.isascii() or not group.isdecimal()
+                    or not is_allowed_sharepoint_url(folder) or urlparse(folder).hostname != urlparse(url).hostname):
+                raise ValidationError("O acesso compartilhado da empresa é inválido.")
+        return cls(code=code, name=name, url=url, group_code=group, folder_url=folder)
 
     def to_dict(self) -> dict[str, str]:
-        return asdict(self)
+        if self.group_code:
+            return asdict(self)
+        return {"code": self.code, "name": self.name, "url": self.url}

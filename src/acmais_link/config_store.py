@@ -49,6 +49,17 @@ class ConfigStore:
             self._write(kept)
             return True
 
+    def replace_group(self, group_code: str, members: list[Company]) -> tuple[int, int]:
+        """Refresh the group's list in one write and retain independent accesses."""
+        with self._lock:
+            kept = [item for item in self.list() if item.group_code != group_code]
+            existing_codes = {item.code.casefold() for item in kept}
+            admitted = [item for item in members if item.code.casefold() not in existing_codes]
+            if not admitted:
+                raise ValueError("As empresas deste grupo já estão cadastradas por outro acesso.")
+            self._write(kept + admitted)
+            return len(admitted), len(members) - len(admitted)
+
     def _read(self) -> dict:
         if not self.path.exists():
             return {"version": 1, "companies": []}

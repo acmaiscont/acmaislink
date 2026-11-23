@@ -154,10 +154,12 @@ function openForm(company = null) {
   formError.hidden = true;
   document.querySelector("#original-code").value = company?.code || "";
   document.querySelector("#url").value = company?.url || "";
-  document.querySelector("#dialog-title").textContent = company ? "Atualizar acesso" : "Adicionar acesso";
-  document.querySelector("#identity-hint").textContent = company
-    ? `Identificação atual: ${company.code} - ${company.name}. Ela será confirmada novamente pelo link.`
-    : "O código e o nome serão identificados automaticamente ao abrir a pasta.";
+  document.querySelector("#dialog-title").textContent = company?.group_code ? "Atualizar acesso do grupo"
+    : company ? "Atualizar acesso" : "Adicionar acesso";
+  document.querySelector("#identity-hint").textContent = company?.group_code
+    ? `O grupo ${company.group_code} usa um link e uma senha para todas as empresas. Salvar atualiza a lista do grupo.`
+    : company ? `Identificação atual: ${company.code} - ${company.name}. Ela será confirmada novamente pelo link.`
+      : "Use o link de uma empresa ou de um grupo para identificar automaticamente as empresas.";
   document.querySelector("#password-hint").textContent = company ? "(deixe em branco para manter)" : "";
   document.querySelector("#password").required = !company;
   dialog.showModal();

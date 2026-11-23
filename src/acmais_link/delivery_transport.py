@@ -5,7 +5,7 @@ import http.client
 import json
 import os
 from pathlib import Path
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote, unquote, urlsplit
 
 from .delivery import DeliveryOutcome, MAX_FILE_SIZE
 from .models import ValidationError, is_allowed_sharepoint_url
@@ -105,6 +105,35 @@ class SharePointDelivery:
     def check_folder(self):
         if not self._folder_exists(self._destination):
             raise MissingDestination("Não foi possível encontrar a pasta deste envio.")
+
+    def list_subfolders(self) -> list[str]:
+        """List immediate child folders through the authenticated SharePoint session."""
+        resource = self._folder_endpoint(self._destination) + "/Folders"
+        endpoint = resource + "?$select=Name&$top=50"
+        expected_path = unquote(self._base + "/_api" + resource).casefold()
+        names = []
+        for _ in range(20):
+            status, result = self._request("GET", endpoint)
+            data = result.get("d", {})
+            rows = data.get("results")
+            if status != 200 or not isinstance(rows, list):
+                raise ValidationError("O SharePoint não confirmou a lista de empresas do grupo.")
+            for row in rows:
+                name = row.get("Name") if isinstance(row, dict) else None
+                if not isinstance(name, str):
+                    raise ValidationError("O SharePoint retornou uma subpasta sem nome no grupo.")
+                names.append(name)
+            next_page = data.get("__next")
+            if not next_page:
+                return names
+            if not is_allowed_sharepoint_url(next_page):
+                raise ValidationError("A próxima página do grupo tem um endereço inválido.")
+            next_url = urlsplit(next_page)
+            if (next_url.hostname != self._host or unquote(next_url.path).casefold() != expected_path
+                    or not next_url.query or next_url.fragment):
+                raise ValidationError("O SharePoint informou uma próxima página fora da pasta do grupo.")
+            endpoint = next_url.path[len(self._base + "/_api"):] + "?" + next_url.query
+        raise ValidationError("O grupo retornou muitas páginas. A lista não foi importada parcialmente.")
 
     def prepare_destination(self, parts):
         suffix = "/" + "/".join(parts)

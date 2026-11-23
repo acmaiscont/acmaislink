@@ -1,5 +1,10 @@
 # Alterações
 
+## 1.1.1
+
+- Cadastro de várias empresas a partir de um link e uma senha de grupo no SharePoint.
+- Abertura e envio direcionados à pasta da empresa selecionada, com preservação dos cadastros individuais existentes.
+
 ## 1.1.0
 
 - Envio guiado para o SharePoint por empresa, setor, tipo de documento e competência. Os atalhos preenchem o mês atual ou anterior.
