@@ -4,6 +4,8 @@ import unittest
 from pathlib import Path
 
 from acmais_link.api import AppApi
+from acmais_link import APP_DISPLAY_TITLE, __version__
+from acmais_link.web_home import render_home
 from acmais_link.config_store import ConfigStore
 from acmais_link.models import Company
 
@@ -110,7 +112,7 @@ class SingleWindowFlowTests(unittest.TestCase):
 
             self.assertEqual(window.shown, 2)
             self.assertTrue(window.toolbar)
-            self.assertEqual(window.title, "ACMAIS LINK - 0000 - Teste")
+            self.assertEqual(window.title, f"{APP_DISPLAY_TITLE} - 0000 - Teste")
             self.assertEqual(config.get("0000").name, "Teste")
             self.assertEqual(credentials.get("0000"), "secret-value")
             self.assertEqual(api._mode, "active")
@@ -194,7 +196,7 @@ class SingleWindowFlowTests(unittest.TestCase):
 
             api._on_loaded(window)
             self.assertEqual(api._mode, "active")
-            self.assertEqual(window.title, "ACMAIS LINK - 0000 - Teste")
+            self.assertEqual(window.title, f"{APP_DISPLAY_TITLE} - 0000 - Teste")
             self.assertTrue(window.toolbar)
 
     def test_native_window_and_dependencies_are_private_to_js_bridge(self):
@@ -211,8 +213,9 @@ class MenuMarkupTests(unittest.TestCase):
         self.assertIn('id="close-company-dialog" type="button"', markup)
         self.assertIn('id="cancel-company" type="button"', markup)
         self.assertIn('id="save-company" type="submit"', markup)
-        self.assertIn('app.js?v=1.0.0', markup)
-        self.assertIn('style.css?v=1.0.0', markup)
+        rendered = render_home(markup)
+        self.assertIn(f'app.js?v={__version__}', rendered)
+        self.assertIn(f'style.css?v={__version__}', rendered)
 
 
 if __name__ == "__main__":

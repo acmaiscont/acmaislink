@@ -7,6 +7,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 FOLDER_PATTERN = re.compile(r"^(?P<code>.+?)\s+-\s+(?P<name>.+)$")
 NUMERIC_FOLDER_PATTERN = re.compile(r"^(?P<code>[0-9]+)\s*-\s*(?P<name>.+)$")
+COMPETENCE_FOLDER_PATTERN = re.compile(r"(?:0[1-9]|1[0-2])-20[0-9]{2}")
 
 
 def _normalize_folder_name(value: str) -> str:
@@ -44,6 +45,8 @@ def extract_company_identity(url: str, page_heading: str = "", *, expected_code:
     candidates.extend(_folder_path_candidates(parsed.path, decode_passes=2))
 
     for candidate in candidates:
+        if COMPETENCE_FOLDER_PATTERN.fullmatch(candidate):
+            continue
         # Numeric company codes also occur as "150-NAME" in SharePoint.
         # Keep the spaced separator mandatory for other codes, so arbitrary
         # hyphenated words (e.g. marketing-list) are not treated as companies.
@@ -83,7 +86,8 @@ _PAGE_HELPERS = r"""
       .flatMap((item) => [item.getAttribute('title'), item.getAttribute('aria-label'), item.textContent])
       .map((text) => (text || '').replace(/\s+/g, ' ').trim())
       // Keep in sync with NUMERIC_FOLDER_PATTERN / FOLDER_PATTERN in Python.
-      .find((text) => /^(?:[0-9]+\s*-\s*.+|.+?\s+-\s+.+)$/.test(text)) || '';
+      .find((text) => !/^(?:0[1-9]|1[0-2])-20[0-9]{2}$/.test(text) &&
+        /^(?:[0-9]+\s*-\s*.+|.+?\s+-\s+.+)$/.test(text)) || '';
   };
 """
 

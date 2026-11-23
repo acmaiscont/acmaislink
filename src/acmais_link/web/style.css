@@ -123,3 +123,30 @@ dialog form { display: flex; flex-direction: column; max-height: calc(100vh - 26
   .dialog-actions { padding-block: 10px; }
 }
 @media (prefers-reduced-motion: reduce) { * { animation-duration: .01ms !important; transition: none !important; } }
+
+.header-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.card-actions .send-action { flex: 1 1 155px; }
+.dialog-subtitle { color: var(--muted); font-size: 13px; margin: 5px 0 0; }
+.delivery-files, .delivery-destination { padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: #f5f8fa; }
+.delivery-files p { color: var(--muted); margin: 8px 0 0; font-size: 13px; }
+.delivery-files button { margin: 0 4px 4px 0; }
+.delivery-files ul { max-height: 100px; overflow: auto; margin-bottom: 0; padding-inline-start: 22px; overflow-wrap: anywhere; }
+.delivery-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 13px; margin-block: 16px; }
+.delivery-fields label { display: grid; gap: 5px; font-size: 13px; font-weight: 650; }
+.delivery-period-field { grid-column: 1 / -1; }
+.period-shortcuts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.period-shortcuts button { min-height: 32px; padding: 4px 10px; font-size: 12px; }
+.delivery-fields select { font: inherit; min-height: 42px; min-width: 0; color: var(--ink); border: 1px solid #bfc9d0; border-radius: 9px; padding: 8px; background: var(--surface); }
+.delivery-destination { display: grid; flex: 1 0 100%; gap: 4px; padding: 8px 10px; overflow-wrap: anywhere; font-size: 12px; }
+.history-list { list-style: none; margin: 0; padding: 0; }
+.history-list li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px 12px; padding: 11px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.history-list small { color: var(--muted); grid-column: 1 / -1; }
+.history-list .receipt-detail { color: var(--ink); font-size: 13px; }
+.receipt-folder { justify-self: start; }
+.receipt-status { font-size: 12px; align-self: start; border-radius: 20px; padding: 3px 8px; background: #fff0ce; color: #714500; font-weight: 650; }
+.receipt-status.sent { background: #e0f4e8; color: #16653c; }
+.receipt-status.failed { background: #fff0ee; color: #952418; }
+@media (max-width: 440px) {
+  .delivery-fields { grid-template-columns: 1fr; }
+  .header-actions { justify-content: center; }
+}

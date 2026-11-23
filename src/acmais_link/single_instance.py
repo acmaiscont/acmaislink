@@ -3,77 +3,168 @@ from __future__ import annotations
 import ctypes
 import os
 import sys
+import threading
 import time
 from ctypes import wintypes
 
 
 MUTEX_NAME = "Local\\ACMAIS_LINK_SingleInstance"
 INSTALLER_MUTEX_NAME = "Local\\ACMAIS_LINK_Installer"
+RELAUNCH_MUTEX_NAME = MUTEX_NAME + "_Relaunch"
+RESTART_REQUEST = MUTEX_NAME + "_RestartRequest"
+RESTART_DECLINED = MUTEX_NAME + "_RestartDeclined"
 WINDOW_TITLE_PREFIX = "ACMAIS LINK"
 
 
 class SingleInstance:
-    """Own a Windows mutex and focus the existing app on duplicate launch."""
+    """Hand off startup between processes without running two app windows."""
 
     def __init__(self) -> None:
         self._handle: int | None = None
+        self._events = ()
+        self._listener = None
+        self._stopping = threading.Event()
 
     def acquire(self) -> bool:
         if sys.platform != "win32":
             return True
-        if self._try_acquire_mutex():
-            return True
-        if not self._installer_running():
-            if self._focus_existing_window():
-                return False
-            # The other process may have exited while we looked for its window.
-            return self._try_acquire_mutex()
-        # A silent installation owns the app mutex for the file swap. Keep a
-        # quick relaunch alive until it completes instead of losing the launch.
-        deadline = time.monotonic() + 30
+        relaunch = self._create_mutex(RELAUNCH_MUTEX_NAME)
+        if not relaunch:
+            return False  # Another launcher already owns the handoff.
+        try:
+            return self._try_acquire_mutex() or self._take_over()
+        finally:
+            self._close_handle(relaunch)
+
+    def _try_acquire_mutex(self) -> bool:
+        self._handle = self._create_mutex(MUTEX_NAME)
+        return bool(self._handle)
+
+    @classmethod
+    def _create_mutex(cls, name):
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.CreateMutexW.argtypes = (wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR)
+        kernel32.CreateMutexW.restype = wintypes.HANDLE
+        handle = kernel32.CreateMutexW(None, False, name)
+        if not handle:
+            raise ctypes.WinError(ctypes.get_last_error())
+        if ctypes.get_last_error() == 183:  # ERROR_ALREADY_EXISTS
+            cls._close_handle(handle)
+            return None
+        return handle
+
+    @staticmethod
+    def _close_handle(handle):
+        if handle:
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+            kernel32.CloseHandle(handle)
+
+    @classmethod
+    def _mutex_exists(cls, name):
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenMutexW.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR)
+        kernel32.OpenMutexW.restype = wintypes.HANDLE
+        handle = kernel32.OpenMutexW(0x100000, False, name)
+        cls._close_handle(handle)
+        return bool(handle)
+
+    @staticmethod
+    def _event(name, *, create=False, manual=False):
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        if create:
+            kernel32.CreateEventW.argtypes = (wintypes.LPVOID, wintypes.BOOL, wintypes.BOOL, wintypes.LPCWSTR)
+            kernel32.CreateEventW.restype = wintypes.HANDLE
+            return kernel32.CreateEventW(None, manual, False, name)
+        kernel32.OpenEventW.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR)
+        kernel32.OpenEventW.restype = wintypes.HANDLE
+        return kernel32.OpenEventW(0x100002, False, name)  # SYNCHRONIZE | EVENT_MODIFY_STATE
+
+    @staticmethod
+    def _signal(handle, *, reset=False):
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        change = kernel32.ResetEvent if reset else kernel32.SetEvent
+        change.argtypes = (wintypes.HANDLE,)
+        return bool(change(handle))
+
+    @staticmethod
+    def _wait(handle, milliseconds):
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.WaitForSingleObject.argtypes = (wintypes.HANDLE, wintypes.DWORD)
+        return kernel32.WaitForSingleObject(handle, milliseconds) == 0
+
+    def _take_over(self):
+        start = time.monotonic()
+        deadline = start + 30
         while time.monotonic() < deadline:
-            if self._focus_existing_window(attempts=1):
-                return False
-            time.sleep(0.1)
+            if self._try_acquire_mutex():
+                return True
+            request = self._event(RESTART_REQUEST)
+            declined = self._event(RESTART_DECLINED)
+            try:
+                if request and declined:
+                    self._focus_existing_window(attempts=1)
+                    self._signal(declined, reset=True)
+                    if self._signal(request):
+                        return self._wait_for_handoff(declined)
+            finally:
+                self._close_handle(request)
+                self._close_handle(declined)
+            if time.monotonic() - start >= 2 and not self._mutex_exists(INSTALLER_MUTEX_NAME):
+                # Older versions lack the handoff protocol. Give them a moment
+                # to exit on their own and bring their window forward if found.
+                if self._focus_existing_window(attempts=1):
+                    self._inform("Feche a versão já aberta e abra o ACMAIS LINK novamente.")
+                    return False
+            time.sleep(.1)
+        self._inform("O ACMAIS LINK ainda está sendo aberto ou atualizado. Tente novamente em instantes.")
+        return False
+
+    def _wait_for_handoff(self, declined):
+        while not self._wait(declined, 150):
             if self._try_acquire_mutex():
                 return True
         return False
 
-    def _try_acquire_mutex(self) -> bool:
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        kernel32.CreateMutexW.argtypes = (wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR)
-        kernel32.CreateMutexW.restype = wintypes.HANDLE
-        kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
-        kernel32.CloseHandle.restype = wintypes.BOOL
-        handle = kernel32.CreateMutexW(None, False, MUTEX_NAME)
-        if not handle:
-            raise ctypes.WinError(ctypes.get_last_error())
-        if ctypes.get_last_error() == 183:  # ERROR_ALREADY_EXISTS
-            kernel32.CloseHandle(handle)
-            return False
-        self._handle = handle
-        return True
-
     @staticmethod
-    def _installer_running() -> bool:
-        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        kernel32.OpenMutexW.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR)
-        kernel32.OpenMutexW.restype = wintypes.HANDLE
-        kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
-        kernel32.CloseHandle.restype = wintypes.BOOL
-        handle = kernel32.OpenMutexW(0x100000, False, INSTALLER_MUTEX_NAME)
-        if handle:
-            kernel32.CloseHandle(handle)
-            return True
-        return False
+    def _inform(message):
+        ctypes.windll.user32.MessageBoxW(None, message, "ACMAIS LINK", 0x10030)
+
+    def listen(self, on_restart):
+        if sys.platform != "win32":
+            return
+        request = self._event(RESTART_REQUEST, create=True)
+        declined = self._event(RESTART_DECLINED, create=True, manual=True)
+        self._events = (request, declined)
+        if not request or not declined:
+            return
+
+        def listen():
+            while not self._stopping.is_set():
+                if self._wait(request, 200) and not self._stopping.is_set():
+                    try:
+                        on_restart()
+                    except Exception:
+                        self.decline()
+
+        self._listener = threading.Thread(target=listen, daemon=True)
+        self._listener.start()
+
+    def decline(self):
+        if self._events:
+            self._signal(self._events[1])
 
     def close(self) -> None:
-        if sys.platform == "win32" and self._handle:
-            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-            kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
-            kernel32.CloseHandle.restype = wintypes.BOOL
-            kernel32.CloseHandle(self._handle)
-            self._handle = None
+        if sys.platform != "win32":
+            return
+        self._stopping.set()
+        if self._listener is not None:
+            self._listener.join()
+        for handle in self._events:
+            self._close_handle(handle)
+        self._events = ()
+        self._close_handle(self._handle)
+        self._handle = None
 
     @staticmethod
     def _focus_existing_window(attempts: int = 40) -> bool:
@@ -132,6 +223,11 @@ class SingleInstance:
             return True
 
         callback = callback_type(find_window)
+        user32.ShowWindowAsync.argtypes = (wintypes.HWND, ctypes.c_int)
+        user32.SetWindowPos.argtypes = (wintypes.HWND, wintypes.HWND, ctypes.c_int, ctypes.c_int,
+                                       ctypes.c_int, ctypes.c_int, wintypes.UINT)
+        for action in (user32.BringWindowToTop, user32.SetForegroundWindow, user32.SetActiveWindow, user32.SetFocus):
+            action.argtypes = (wintypes.HWND,)
         for _ in range(attempts):
             target.clear()
             user32.EnumWindows(callback, 0)

@@ -30,7 +30,7 @@ Abra `http://127.0.0.1:8768/`. Não precisa de Node.js ou compilação para publ
 ## Manutenção
 
 - `dist/index.html`: textos, versão, tamanhos e links dos pacotes.
-- Os downloads apontam para a versão estável `v1.0.0`, não para arquivos locais.
+- Os downloads apontam para a versão estável `v1.1.0`, não para arquivos locais.
 - Ao lançar outra versão, atualize os dois links, a versão, os tamanhos e as
   notas em conjunto. Confira os hashes no arquivo `SHA256SUMS.txt` da Release.
 - Adicione outros programas somente após autorização de distribuição ao cliente.

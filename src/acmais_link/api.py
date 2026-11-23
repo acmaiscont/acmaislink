@@ -1,15 +1,22 @@
 from __future__ import annotations
 
+import http.client
 import logging
+import sqlite3
 import threading
 import time
 import webbrowser
+from datetime import date
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
+from . import APP_DISPLAY_TITLE
 from .config_store import ConfigStore
 from .credential_store import CredentialStore, CredentialStoreError
+from .delivery import CATALOG, DeliveryItem, DeliveryOutcome, DeliveryRoute, delivery_selection, library_destination, previous_period, suggest_delivery
+from .delivery_transport import SharePointDelivery, UNCONFIRMED
 from .models import Company, ValidationError, is_allowed_sharepoint_url
+from .web_home import is_home_document
 from .sharepoint import (
     extract_company_identity,
     navigation_cover_script,
@@ -28,6 +35,7 @@ class AppApi:
         home_url: str,
         *,
         updates=None,
+        history=None,
     ):
         # pywebview exposes public members of js_api. Keep every dependency and
         # native object private so the bridge never tries to serialize them.
@@ -47,6 +55,114 @@ class AppApi:
         self._lock = threading.RLock()
         self._persistence_lock = threading.Lock()
         self._updates = updates
+        self._history = history
+        self._selected_files: tuple[DeliveryItem, ...] = ()
+        self._delivery_lock = threading.Lock()
+        self._selection_lock = threading.Lock()
+
+    def delivery_options(self) -> dict:
+        today = date.today()
+        return {"ok": True, "catalog": CATALOG, "currentPeriod": today.isoformat()[:7],
+                "previousPeriod": previous_period(today)}
+
+    def _restart_activity(self):
+        with self._lock:
+            if self._mode == "delivering" or self._delivery_lock.locked():
+                return "Há um envio de documentos em andamento."
+            if self._persistence_lock.locked():
+                return "Há uma alteração de cadastro em andamento."
+            if self._mode in ("preparing", "navigating"):
+                return "Há uma operação com o SharePoint em andamento."
+            if self._selection_lock.locked():
+                return "Há uma seleção de arquivos ou pastas em andamento."
+        return ""
+
+    def _stop_for_restart(self):
+        with self._lock:
+            self._navigation_token += 1
+            self._mode = "closing"
+            self._pending = None
+        # Let in-flight credential transactions roll back and let the upload
+        # worker record its final known status before disposing of WebView2.
+        with self._persistence_lock, self._delivery_lock, self._selection_lock:
+            pass
+
+    def choose_delivery_files(self) -> dict:
+        return self._choose_delivery_items(folder=False)
+
+    def choose_delivery_folder(self) -> dict:
+        return self._choose_delivery_items(folder=True)
+
+    def _choose_delivery_items(self, *, folder: bool) -> dict:
+        with self._lock:
+            if self._mode != "home":
+                return {"ok": False, "error": "Volte à lista antes de selecionar arquivos."}
+            token = self._navigation_token
+        choose = getattr(self._window, "choose_delivery_folder" if folder else "choose_delivery_files", None)
+        if not callable(choose):
+            return {"ok": False, "error": "O envio guiado está disponível no Windows com WebView2."}
+        try:
+            with self._selection_lock:
+                if not self._is_current(token, "home"):
+                    return {"ok": True, "cancelled": True}
+                chosen = choose()
+        except Exception as exc:
+            self._logger.warning("Falha no seletor de envio (%s)", type(exc).__name__)
+            return {"ok": False, "error": "Não foi possível abrir o seletor de pastas." if folder
+                    else "Não foi possível abrir o seletor de arquivos."}
+        try:
+            if not chosen:
+                return {"ok": True, "cancelled": True}
+            if isinstance(chosen, str):
+                chosen = (chosen,)
+            files = delivery_selection(chosen, folder=folder)
+            suggestion = suggest_delivery(files)
+            with self._lock:
+                if not self._is_current(token, "home"):
+                    return {"ok": True, "cancelled": True}
+                self._selected_files = files
+            return {"ok": True, "files": [item.label for item in files], "suggestion": suggestion}
+        except (OSError, ValidationError) as exc:
+            message = str(exc) if isinstance(exc, ValidationError) else "Não foi possível ler os arquivos selecionados."
+            return {"ok": False, "error": message}
+
+    def recent_deliveries(self) -> dict:
+        try:
+            return {"ok": True, "receipts": self._history.recent() if self._history else []}
+        except (OSError, sqlite3.Error):
+            return {"ok": False, "error": "O histórico está indisponível."}
+
+    def begin_delivery(self, code: str, payload: dict) -> dict:
+        try:
+            route = DeliveryRoute.from_payload(payload)
+            with self._lock:
+                if self._mode != "home" or self._delivery_lock.locked():
+                    raise ValidationError("Aguarde o envio em andamento.")
+                token, files = self._navigation_token, self._selected_files
+            if not self._history or not callable(getattr(self._window, "delivery_cookies", None)):
+                raise ValidationError("O envio guiado requer Windows com WebView2.")
+            if not files:
+                raise ValidationError("Selecione os arquivos para enviar.")
+            self._queue_navigation({"kind": "open", "code": code, "attempts": 0,
+                                    "delivery": route, "files": files}, expected_token=token, expected_mode="home")
+            return {"ok": True}
+        except Exception as exc:
+            return self._error(exc)
+
+    def open_delivery_folder(self, receipt_id: int) -> dict:
+        try:
+            with self._lock:
+                request_token = self._navigation_token
+            record = self._history.route_for(receipt_id) if self._history and type(receipt_id) is int else None
+            if record is None:
+                raise ValidationError("Este registro não tem um destino disponível na estrutura atual.")
+            code, route = record
+            self._queue_navigation({"kind": "open", "code": code, "attempts": 0,
+                                    "delivery": route, "open_only": True},
+                                   expected_token=request_token, expected_mode="home")
+            return {"ok": True}
+        except Exception as exc:
+            return self._error(exc)
 
     def get_update_status(self) -> dict:
         # Read-only: the local UI cannot trigger installation or close a window.
@@ -154,10 +270,16 @@ class AppApi:
     def return_home(self) -> dict:
         if self._window is None:
             return {"ok": False, "error": "A janela principal não está disponível."}
+        return self._return_home()
+
+    def _return_home(self, expected_token=None) -> dict:
         with self._lock:
+            if self._mode == "closing" or (expected_token is not None and expected_token != self._navigation_token):
+                return {"ok": True}
             self._navigation_token += 1
             self._mode = "home"
             self._pending = None
+            self._selected_files = ()
             self._current_company = None
             self._probe_scheduled = False
             token = self._navigation_token
@@ -199,9 +321,9 @@ class AppApi:
             show_home = getattr(window, 'show_home', None)
             if callable(show_home):
                 current = window.get_current_url() or ''
-                if current == self._home_url or urlparse(current).hostname in ('localhost', '127.0.0.1'):
+                if is_home_document(current, self._home_url):
                     show_home(lambda: self._is_current(token, 'home'))
-            window.set_title("ACMAIS LINK")
+            window.set_title(APP_DISPLAY_TITLE)
             window.show()
             return
 
@@ -368,8 +490,12 @@ class AppApi:
                 # Shared-link pages render their password component asynchronously.
                 # Wait through several clean probes before considering the folder ready.
                 pending["ready_checks"] = pending.get("ready_checks", 0) + 1
-                if pending["ready_checks"] < 5:
+                if pending["ready_checks"] < (2 if pending.get("delivery") is not None else 5):
                     self._retry_navigation(token)
+                    return
+
+                if pending.get("delivery") is not None:
+                    self._continue_delivery(window, company, current_url, pending, token)
                     return
 
                 if self._activate_company(company, token) is None:
@@ -385,6 +511,120 @@ class AppApi:
             if self._is_current(token, "navigating"):
                 self._logger.exception("Falha ao concluir navegação")
                 self._fail_navigation(self._error(exc)["error"], token)
+
+    def _continue_delivery(self, window, company, current_url, pending, token):
+        if "destination" not in pending:
+            current = lambda: self._is_current(token, "navigating")
+            route = pending["delivery"]
+            canonical = library_destination(current_url, company.code, route)
+            if canonical is None:
+                raise ValidationError("Não foi possível localizar a raiz da empresa no SharePoint.")
+            destination, destination_url = canonical
+            with SharePointDelivery(current_url, destination,
+                                    lambda url: window.delivery_cookies(url, current), current) as transport:
+                if pending.get("open_only"):
+                    transport.check_folder()
+                else:
+                    transport.prepare_destination(route.segments)
+            pending["destination"] = destination
+            pending["ready_checks"] = 0
+            if destination_url != current_url:
+                self._load_navigation(destination_url, token, "navigating")
+                self._retry_navigation(token)
+                return
+        query = {key.casefold(): values for key, values in parse_qs(urlparse(current_url).query).items()}
+        folders = query.get("id") or query.get("rootfolder") or []
+        if folders != [pending["destination"]]:
+            self._retry_navigation(token)
+            return
+        if pending.get("open_only"):
+            active_token = self._activate_company(company, token)
+            if active_token is not None:
+                self._show_company(window, company, active_token)
+            return
+        with self._lock:
+            if not self._is_current(token, "navigating"):
+                return
+            self._mode = "delivering"
+        self._run_delivery(window, company, current_url, pending, token)
+
+    def _run_delivery(self, window, company, current_url, pending, token):
+        current = lambda: self._is_current(token, "delivering")
+        with self._delivery_lock:
+            if not current():
+                return
+            try:
+                with SharePointDelivery(
+                    current_url, pending["destination"],
+                    lambda url: window.delivery_cookies(url, current), current,
+                ) as transport:
+                    transport.prepare(checked=True)
+                    counts, issues = self._send_selection(window, company, pending, transport, current)
+                with self._lock:
+                    if not current():
+                        return
+                    self._notice = {
+                        "message": (f"{counts['sent']} enviado(s), {counts['failed']} com falha "
+                                    f"e {counts['uncertain']} a confirmar." if issues
+                                    else f"Envio concluído. {counts['sent']} item(ns) enviado(s)."),
+                        "error": bool(issues),
+                        "deliveryIssues": issues,
+                    }
+                self._return_home(expected_token=token)
+            except Exception as exc:
+                self._logger.warning("Falha no envio guiado: %s", type(exc).__name__)
+                message = str(exc) if isinstance(exc, ValidationError) else "Não foi possível concluir o envio. Confira o histórico."
+                self._fail_navigation(message, token)
+
+    def _send_selection(self, window, company, pending, transport, current):
+        counts = {"sent": 0, "failed": 0, "uncertain": 0}
+        issues = []
+        files = pending["files"]
+        progress = getattr(window, "delivery_progress", None)
+        for index, item in enumerate(files, 1):
+            if not current():
+                break
+            last_update, last_sent = -1.0, 0
+
+            def report(sent, waiting):
+                nonlocal last_update, last_sent
+                now = time.monotonic()
+                if callable(progress) and current() and (waiting or (sent and not last_sent) or now - last_update >= .25):
+                    try:
+                        progress(index, len(files), sent, item.size, waiting, item.directory, current)
+                    except (TimeoutError, RuntimeError):
+                        pass  # A progress update must not change the transfer outcome.
+                    last_update, last_sent = now, sent
+
+            report(0, False)
+            receipt = self._history.start(
+                company.code, f"{company.code} - {company.name}", pending["delivery"],
+                item.label,
+            )
+            pending["started_files"] = True
+            try:
+                same_path = item.source.resolve(strict=True) == item.source
+            except (OSError, RuntimeError):
+                same_path = False
+            if not same_path:
+                outcome = DeliveryOutcome("failed", "O item foi movido, alterado ou não está disponível. Selecione-o novamente.")
+            else:
+                try:
+                    if item.directory:
+                        transport.ensure_folder(item.parts)
+                        outcome = DeliveryOutcome("sent")
+                    else:
+                        outcome = transport.upload(item.source, parts=item.parts, progress=report, expected_size=item.size)
+                except ValidationError as exc:
+                    outcome = DeliveryOutcome("failed", str(exc))
+                except (OSError, http.client.HTTPException):
+                    outcome = (DeliveryOutcome("uncertain", "O SharePoint não confirmou a criação da subpasta. Confira o destino.")
+                               if item.directory else UNCONFIRMED)
+            self._history.finish(receipt, outcome.status, outcome.detail)
+            counts[outcome.status] += 1
+            if outcome.detail:
+                issues.append({"filename": item.label, "status": outcome.status, "detail": outcome.detail})
+        return counts, issues
 
     def _activate_company(self, company: Company, token: int) -> int | None:
         with self._lock:
@@ -462,7 +702,7 @@ class AppApi:
                     expected_token != self._navigation_token
                     or (expected_mode is not None and self._mode != expected_mode)):
                 return
-            if self._mode in ("preparing", "navigating"):
+            if self._mode in ("preparing", "navigating", "delivering", "closing"):
                 raise ValidationError("Aguarde a abertura atual ou volte para as empresas.")
             self._navigation_token += 1
             # Loaded events and probes must not run until the loading screen
@@ -481,7 +721,7 @@ class AppApi:
         if not self._is_current(token, "preparing"):
             return
         try:
-            self._window.set_title("ACMAIS LINK - Abrindo documentos...")
+            self._window.set_title(f"{APP_DISPLAY_TITLE} - Abrindo documentos...")
             if not self._is_current(token, "preparing"):
                 return
             self._window.show()
@@ -489,7 +729,11 @@ class AppApi:
                 return
             show_loading = getattr(self._window, 'show_loading', None)
             if callable(show_loading):
-                shown = show_loading(lambda: self._is_current(token, 'preparing'))
+                guard = lambda: self._is_current(token, 'preparing')
+                if "files" in pending:
+                    shown = show_loading(guard, delivery=True)
+                else:
+                    shown = show_loading(guard)
             else:
                 shown = self._evaluate_navigation(self._window, navigation_cover_script(
                     navigation_token=token), token, 'preparing')
@@ -630,7 +874,7 @@ class AppApi:
                 return False
             if shown is not True:
                 raise RuntimeError("Navigation toolbar was not installed")
-            window.set_title(f"ACMAIS LINK - {company.code} - {company.name}")
+            window.set_title(f"{APP_DISPLAY_TITLE} - {company.code} - {company.name}")
             if self._is_current(token, "active"):
                 window.show()
                 return True
@@ -642,6 +886,7 @@ class AppApi:
         with self._lock:
             if token != self._navigation_token:
                 return
+            pending = self._pending or {}
             self._navigation_token += 1
             home_token = self._navigation_token
             self._mode = "home"
@@ -649,6 +894,12 @@ class AppApi:
             self._current_company = None
             self._probe_scheduled = False
             self._notice = {"message": message, "error": True}
+            route = pending.get("delivery")
+            if route and not pending.get("open_only") and not pending.get("started_files"):
+                self._notice["deliveryDraft"] = {
+                    "code": pending["code"], "period": route.period, "sector": route.sector,
+                    "kind": route.kind, "files": [item.label for item in pending["files"]],
+                }
         self._logger.warning("Navegação interrompida: %s", message)
         if self._window and self._is_current(home_token, "home"):
             self._load_navigation(self._home_url, home_token, 'home')

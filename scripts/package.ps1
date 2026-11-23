@@ -15,9 +15,14 @@ try {
         throw 'Instalador do WebView2 sem assinatura válida da Microsoft.'
     }
     New-Item -ItemType Directory -Force artifacts | Out-Null
+    . "$PSScriptRoot\sign-local.ps1"
+    if ($env:ACMAIS_SIGNING_THUMBPRINT) {
+        Assert-AcmaisSignature -Path "release-v$version\ACMAIS LINK\ACMAIS LINK.exe"
+    }
     foreach ($flavor in @('update', 'full')) {
         & $Nsis '/INPUTCHARSET' 'UTF8' "/DVERSION=$version" "/DFLAVOR=$flavor" 'installer\acmais.nsi'
         if ($LASTEXITCODE -ne 0) { throw "Falha ao gerar pacote $flavor." }
+        Protect-AcmaisExecutable -Path "artifacts\ACMAIS-LINK-$version-x64-$flavor.exe"
     }
     $hashes = Get-FileHash "artifacts\ACMAIS-LINK-$version-x64-*.exe" -Algorithm SHA256
     $hashes | ForEach-Object { "$($_.Hash.ToLowerInvariant())  $([IO.Path]::GetFileName($_.Path))" } |

@@ -28,6 +28,10 @@ class SharePointScriptTests(unittest.TestCase):
     def test_rejects_folder_without_standard_name(self):
         self.assertIsNone(extract_company_identity("https://tenant.sharepoint.com/sites/docs"))
 
+    def test_competence_is_not_mistaken_for_company_identity(self):
+        url = "https://tenant.sharepoint.com/AllItems.aspx?id=" + quote("/docs/150-Empresa/2026/10-2026/Contábil/Extratos", safe="")
+        self.assertEqual(extract_company_identity(url, "10-2026"), ("150", "Empresa"))
+
     def test_existing_company_identity_must_match_selected_code(self):
         self.assertIsNone(extract_company_identity('https://tenant.sharepoint.com/share', '0000 - Teste', expected_code='150'))
         self.assertEqual(extract_company_identity('https://tenant.sharepoint.com/share', '150-Empresa', expected_code='150'), ('150', 'Empresa'))

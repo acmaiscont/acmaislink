@@ -1,6 +1,14 @@
 # Alterações
 
-## 1.0.0 — candidato, não publicado
+## 1.1.0
+
+- Envio guiado para o SharePoint por empresa, setor, tipo de documento e competência. Os atalhos preenchem o mês atual ou anterior.
+- Envio de arquivos avulsos ou pastas inteiras, com criação da estrutura de destino e progresso por item.
+- Sugestões de destino para notas fiscais, extratos e documentos contábeis reconhecidos.
+- Histórico local por item e resultado com motivos de falha, inclusive identificação de nomes duplicados com preservação dos arquivos existentes.
+- Reabertura em janela única, com confirmação quando houver uma operação em andamento. A tela inicial é carregada diretamente do pacote.
+
+## 1.0.0
 
 - Atualizações automáticas e silenciosas pelo GitHub Releases, com digest SHA-256 obrigatório.
 - Dois instaladores x64: completo offline com WebView2 e leve para atualização.

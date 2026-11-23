@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "acmais-link"
-version = "1.0.0"
+dynamic = ["version"]
 description = "Portal desktop leve para acesso seguro aos ambientes SharePoint da ACMais"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -22,6 +22,9 @@ acmais-link = "acmais_link.main:main"
 [tool.setuptools]
 package-dir = {"" = "src"}
 include-package-data = true
+
+[tool.setuptools.dynamic]
+version = {attr = "acmais_link.__version__"}
 
 [tool.setuptools.packages.find]
 where = ["src"]

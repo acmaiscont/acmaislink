@@ -1,15 +1,16 @@
-# ACMAIS LINK 1.0.0 — publicação aprovada
+# Distribuição do ACMAIS LINK
 
-O proprietário aprovou a publicação da versão 1.0.0. O repositório de distribuição é
-https://github.com/acmaiscont/acmaislink. O aplicativo consulta apenas Releases
-públicas estáveis; branches, drafts e pré-lançamentos não são instalados.
+O repositório de distribuição é https://github.com/acmaiscont/acmaislink.
+O aplicativo consulta apenas Releases públicas estáveis.
+A atualização pública de 1.0.0 é diretamente para 1.1.0. Os instaladores de
+homologação com perfil separado não fazem parte da distribuição.
 
 ## Pacotes
 
 | Arquivo | Uso |
 | --- | --- |
-| ACMAIS-LINK-1.0.0-x64-full.exe | Primeira instalação, com instalador offline Microsoft WebView2 incluído; instala o componente só quando ausente. |
-| ACMAIS-LINK-1.0.0-x64-update.exe | Instalação leve ou atualização, exige WebView2 já instalado. |
+| ACMAIS-LINK-1.1.0-x64-full.exe | Primeira instalação. Inclui o instalador offline do Microsoft WebView2. |
+| ACMAIS-LINK-1.1.0-x64-update.exe | Instalação leve ou atualização. Exige WebView2 já instalado. |
 
 Windows 10/11 x64. Instalação por usuário em `%LOCALAPPDATA%\Programs\ACMAIS LINK`.
 Atalhos na área de trabalho e menu Iniciar. Na instalação manual, o assistente
@@ -49,10 +50,8 @@ anteriores podem ocupar espaço adicional; não há remoção automática de ver
 
 Execuções por código-fonte e cópias avulsas de desenvolvimento não aplicam
 atualizações. Apenas o executável empacotado na instalação padrão, com o marcador
-de instalação concluída, habilita esse fluxo. Esta edição continua em 1.0.0:
-instale-a uma vez para habilitar a automação. Edições anteriores não ganham esse
-comportamento retroativamente. Próximas Releases precisam ter versão superior;
-republicar a mesma 1.0.0 não dispara atualização.
+de instalação concluída, habilita esse fluxo. Próximas Releases precisam
+ter versão superior à instalada.
 
 O hash detecta corrupção e troca de bytes; não protege contra comprometimento
 do próprio repositório. Proteger conta e permissões de publicação do GitHub é
@@ -74,13 +73,6 @@ Se o OneDrive produzir cópias de conflito, reconcilie-as antes de compilar.
 
 ## Após aprovação do proprietário
 
-A aprovação foi recebida em 15/10/2026. O lançamento usa os módulos aprovados
-no candidato de 13/10; nomes reais de clientes nas fixtures foram substituídos
-por dados fictícios antes do commit público, sem alterar o comportamento do app.
-Os instaladores publicados são exatamente os aprovados em
-`artifacts/validacao-2026-10-13-fluxo/`, sem trocar o runtime durante a publicação.
-SHA-256 completo: `93bce5c993939e1b9aef4f5903cae6efcb18765cc39eecb9d034b9242e8f2d44`.
-SHA-256 leve: `3974aab219b037a29181e882b60489da1b5b2e3b1f05d158d37aa3aca0b8c681`.
 A página estática de downloads fica em `site-downloads/dist/`, pronta para
 integração no site atual; sua criação não altera hospedagem nem DNS.
 
@@ -92,7 +84,7 @@ integração no site atual; sua criação não altera hospedagem nem DNS.
    como estável no repositório de produção: todos os clientes instalados consultarão esse canal.
 4. Definir assinatura de código Windows. Os EXEs ACMAIS atuais não são assinados;
    o Windows pode apresentar SmartScreen. O WebView2 incluído é assinado pela Microsoft.
-5. Criar tag `v1.0.0` e Release inicialmente em draft, anexando os dois instaladores
+5. Criar a tag da versão e a Release inicialmente em draft, anexando os dois instaladores
    e SHA256SUMS. Conferir hashes, notas e nomes antes de publicar como estável.
 6. Nas próximas versões, manter exatamente `ACMAIS-LINK-<versão>-x64-update.exe`.
    O GitHub precisa fornecer `digest: sha256:...` no asset. Sem digest, o app recusa.
@@ -101,9 +93,7 @@ integração no site atual; sua criação não altera hospedagem nem DNS.
 
 A máquina de desenvolvimento já possui WebView2. Não remover o runtime compartilhado
 para simular ausência. O caminho de ausência é verificado por testes e revisão,
-mas instalação offline em Windows limpo exige a VM acima. Antes da aprovação,
-não havia Release pública para validar uma atualização real. A primeira Release
-não testa a migração entre versões; essa homologação requer uma versão posterior.
+mas instalar o runtime offline em um Windows limpo exige a VM acima.
 
 Referências: [modo silencioso NSIS](https://nsis.sourceforge.io/Docs/Chapter3.html)
 e [ciclo de execução pywebview](https://pywebview.flowrl.com/guide/usage).

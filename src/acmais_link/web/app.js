@@ -14,7 +14,10 @@ const cancelOpening = document.querySelector("#cancel-opening");
 let previousFocus = null;
 
 let localToken = null;
-window.bootstrapAcmais = (token) => { localToken = token; initializeApp(); };
+window.bootstrapAcmais = (token) => {
+  localToken = token;
+  initializeApp();
+};
 const api = () => localToken && window.pywebview?.api ? new Proxy({}, {
   get: (_, name) => (...args) => window.pywebview.api.command(localToken, name, args)
 }) : null;
@@ -54,7 +57,16 @@ async function loadCompanies() {
       render();
       // A failure to read a one-off notice must not hide an already loaded list.
       api().consume_notice().then((noticeResult) => {
-        if (noticeResult.notice) notify(noticeResult.notice.message, noticeResult.notice.error);
+        const notice = noticeResult.notice;
+        const retryCompany = state.companies.find(item => item.code === notice?.deliveryDraft?.code);
+        if (retryCompany && !document.querySelector("dialog[open]") && !state.busy) {
+          openDelivery(retryCompany, notice.deliveryDraft, notice.message);
+        } else if (notice?.deliveryIssues?.length && !document.querySelector("dialog[open]") && !state.busy) {
+          showDeliveryResult(notice);
+        } else if (notice) {
+          const detail = notice.deliveryIssues?.[0]?.detail;
+          notify(detail ? `${notice.message} ${detail} Consulte o histórico.` : notice.message, notice.error);
+        }
       }).catch(() => {});
       return true;
     } catch {
@@ -121,7 +133,8 @@ function render() {
         </div>
       </div>
       <div class="card-actions">
-        <button class="primary" data-action="open" data-code="${escapeHtml(company.code)}">Abrir documentos</button>
+        <button class="primary send-action" data-action="deliver" data-code="${escapeHtml(company.code)}">Enviar documentos</button>
+        <button class="ghost" data-action="open" data-code="${escapeHtml(company.code)}">Abrir documentos</button>
         <button class="ghost" data-action="edit" data-code="${escapeHtml(company.code)}" aria-label="Editar ${escapeHtml(company.name)}">Editar</button>
       </div>
       <div class="secondary-actions">
@@ -207,6 +220,7 @@ grid.addEventListener("click", async (event) => {
   if (!button || button.disabled || state.busy) return;
   const company = state.companies.find((item) => item.code === button.dataset.code);
   if (!company) return;
+  if (button.dataset.action === "deliver") return openDelivery(company);
   if (button.dataset.action === "edit") return openForm(company);
   if (button.dataset.action === "delete") return removeCompany(company);
   button.disabled = true;
@@ -266,7 +280,7 @@ cancelOpening.addEventListener("click", cancelNavigation);
 document.addEventListener("keydown", (event) => {
   if (state.busy && event.key === "Escape") { event.preventDefault(); cancelNavigation(); }
   else if (state.busy && event.key === "Tab") { event.preventDefault(); cancelOpening.focus(); }
-  else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f" && !dialog.open && !confirmDialog.open && !state.busy) {
+  else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f" && !document.querySelector("dialog[open]") && !state.busy) {
     event.preventDefault();
     document.querySelector("#search").focus();
   } else if (event.key === "Escape" && event.target.id === "search") {
@@ -302,17 +316,270 @@ async function refreshUpdateStatus() {
       new Promise((_, reject) => { timeout = window.setTimeout(() => reject(new Error('timeout')), 5000); }),
     ]);
     if (canReadUpdateStatus()) {
-      updateStatus.textContent = result?.ok && result.status === 'ready'
-        ? 'Atualização pronta · será aplicada ao fechar'
-        : 'Atualizações automáticas';
+      if (result?.ok) updateStatus.textContent = result.status === 'disabled' ? 'Atualizações automáticas indisponíveis'
+        : result.status === 'ready' ? 'Atualização pronta · será aplicada ao fechar' : 'Atualizações automáticas';
     }
   } catch {
-    if (canReadUpdateStatus()) updateStatus.textContent = 'Atualizações automáticas';
+    // Preserve the displayed mode when the native status is unavailable.
   } finally {
     window.clearTimeout(timeout);
     updateStatusPending = false;
   }
 }
+
+const deliveryDialog = document.querySelector("#delivery-dialog");
+const deliveryForm = document.querySelector("#delivery-form");
+const deliverySector = document.querySelector("#delivery-sector");
+const deliveryKind = document.querySelector("#delivery-kind");
+const deliveryPeriod = document.querySelector("#delivery-period");
+const periodShortcuts = document.querySelectorAll(".period-shortcuts button");
+const deliveryError = document.querySelector("#delivery-error");
+const deliverySubmit = document.querySelector("#submit-delivery");
+const chooseFiles = document.querySelector("#choose-delivery-files");
+const chooseFolder = document.querySelector("#choose-delivery-folder");
+const historyDialog = document.querySelector("#history-dialog");
+let draft = null;
+let choosingFiles = false;
+
+function fillOptions(select, values) {
+  select.replaceChildren(new Option("Selecione", ""), ...values.map(value => new Option(value, value)));
+}
+
+function updateDeliveryPreview() {
+  const [year, month] = deliveryPeriod.value.split("-");
+  const valid = Boolean(draft?.files.length && deliveryForm.checkValidity());
+  const destination = document.querySelector("#delivery-destination");
+  destination.hidden = !valid;
+  deliverySubmit.disabled = !valid || choosingFiles;
+  if (valid) {
+    const parts = [`${draft.company.code} - ${draft.company.name}`, year, `${month}-${year}`, deliverySector.value, deliveryKind.value];
+    document.querySelector("#delivery-path").textContent = parts.join(" / ");
+  }
+}
+
+function showDeliveryError(message) {
+  deliveryError.textContent = message;
+  deliveryError.hidden = false;
+}
+
+function renderDeliveryFiles(files) {
+  const list = document.querySelector("#delivery-files-list");
+  list.replaceChildren(...files.map(filename => {
+    const item = document.createElement("li");
+    item.textContent = filename;
+    return item;
+  }));
+  list.hidden = !files.length;
+  document.querySelector("#delivery-files-summary").textContent = files.length === 1
+    ? "1 item selecionado" : `${files.length} itens selecionados`;
+}
+
+async function openDelivery(company, saved = null, message = "") {
+  if (!api() || deliveryDialog.open) return;
+  const next = { company, files: [], catalog: {}, periods: {} };
+  draft = next;
+  deliveryForm.reset();
+  deliveryError.hidden = true;
+  fillOptions(deliverySector, []);
+  fillOptions(deliveryKind, []);
+  document.querySelector("#delivery-company").textContent = `${company.code} - ${company.name}`;
+  document.querySelector("#delivery-files-summary").textContent = "Até 30 arquivos avulsos ou 300 itens por pasta. Limite de 100 MB por arquivo.";
+  document.querySelector("#delivery-files-list").hidden = true;
+  document.querySelector("#delivery-suggestion").hidden = true;
+  chooseFolder.disabled = chooseFiles.disabled = true;
+  periodShortcuts.forEach(button => { button.disabled = true; });
+  updateDeliveryPreview();
+  deliveryDialog.showModal();
+  try {
+    const options = await api().delivery_options();
+    if (!deliveryDialog.open || draft !== next) return;
+    if (!options.ok) throw Error();
+    next.catalog = options.catalog;
+    next.periods = { currentPeriod: options.currentPeriod, previousPeriod: options.previousPeriod };
+    periodShortcuts.forEach(button => { button.disabled = !next.periods[button.dataset.period]; });
+    fillOptions(deliverySector, Object.keys(next.catalog));
+    if (saved) {
+      next.files = saved.files;
+      deliverySector.value = saved.sector;
+      fillOptions(deliveryKind, next.catalog[saved.sector] || []);
+      deliveryKind.value = saved.kind;
+      deliveryPeriod.value = saved.period;
+      renderDeliveryFiles(next.files);
+      showDeliveryError(message);
+      updateDeliveryPreview();
+    }
+    chooseFolder.disabled = chooseFiles.disabled = false;
+    chooseFiles.focus();
+  } catch {
+    if (deliveryDialog.open && draft === next) showDeliveryError("Não foi possível carregar as opções de envio.");
+  }
+}
+
+deliverySector.addEventListener("change", () => {
+  fillOptions(deliveryKind, draft?.catalog[deliverySector.value] || []);
+  updateDeliveryPreview();
+});
+deliveryForm.addEventListener("input", updateDeliveryPreview);
+periodShortcuts.forEach(button => button.addEventListener("click", () => {
+  const period = draft?.periods[button.dataset.period];
+  if (period) {
+    deliveryPeriod.value = period;
+    if (draft.appliedSuggestion) draft.appliedSuggestion.period = null;
+    updateDeliveryPreview();
+  }
+}));
+async function chooseDeliveryItems(folder) {
+  if (!draft || choosingFiles) return;
+  const active = draft;
+  choosingFiles = chooseFolder.disabled = chooseFiles.disabled = true;
+  deliveryError.hidden = true;
+  updateDeliveryPreview();
+  try {
+    const result = folder ? await api().choose_delivery_folder() : await api().choose_delivery_files();
+    if (!deliveryDialog.open || draft !== active) return;
+    if (!result.ok) return showDeliveryError(result.error);
+    if (result.cancelled) return;
+    active.files = result.files;
+    renderDeliveryFiles(active.files);
+    const previous = active.appliedSuggestion;
+    if (previous && previous.sector === deliverySector.value && previous.kind === deliveryKind.value
+        && previous.period === deliveryPeriod.value) {
+      deliverySector.value = "";
+      fillOptions(deliveryKind, []);
+      deliveryPeriod.value = "";
+    }
+    active.appliedSuggestion = null;
+    const suggest = result.suggestion && !deliverySector.value && !deliveryKind.value;
+    const hint = document.querySelector("#delivery-suggestion");
+    if (suggest) {
+      const { sector, kind, period } = result.suggestion;
+      deliverySector.value = sector;
+      fillOptions(deliveryKind, active.catalog[sector] || []);
+      deliveryKind.value = kind || "";
+      if (!deliveryPeriod.value && period) deliveryPeriod.value = period;
+      active.appliedSuggestion = { sector, kind: deliveryKind.value, period: period || "" };
+      hint.textContent = kind ? "Confira o destino sugerido antes de enviar."
+        : "Confira os campos sugeridos e selecione o tipo de documento.";
+    }
+    const different = result.suggestion && !suggest && (result.suggestion.sector !== deliverySector.value
+      || (result.suggestion.kind && result.suggestion.kind !== deliveryKind.value));
+    if (different) {
+      const { sector, kind } = result.suggestion;
+      hint.textContent = `Os itens sugerem ${kind ? `${sector} / ${kind}` : sector}. Confira o destino selecionado.`;
+    }
+    hint.hidden = !(suggest || different);
+  } catch {
+    if (draft === active) showDeliveryError(folder ? "Não foi possível selecionar a pasta." : "Não foi possível selecionar os arquivos.");
+  } finally {
+    choosingFiles = false;
+    if (deliveryDialog.open && draft === active) {
+      chooseFolder.disabled = chooseFiles.disabled = false;
+      updateDeliveryPreview();
+    }
+  }
+}
+chooseFiles.addEventListener("click", () => chooseDeliveryItems(false));
+chooseFolder.addEventListener("click", () => chooseDeliveryItems(true));
+deliveryForm.addEventListener("submit", async event => {
+  event.preventDefault();
+  if (state.busy || deliverySubmit.disabled || !draft || !deliveryForm.reportValidity()) return;
+  const { company } = draft;
+  const payload = { sector: deliverySector.value, kind: deliveryKind.value, period: deliveryPeriod.value };
+  const operation = ++state.navigationSeq;
+  deliveryDialog.close();
+  setBusy(true, "Preparando envio", "Conectando ao SharePoint e conferindo o destino…");
+  await nextPaint();
+  if (operation !== state.navigationSeq) return;
+  try {
+    const result = await api().begin_delivery(company.code, payload);
+    if (operation !== state.navigationSeq || result.ok) return;
+    setBusy(false);
+    deliveryDialog.showModal();
+    showDeliveryError(result.error);
+  } catch {
+    if (operation !== state.navigationSeq) return;
+    setBusy(false);
+    deliveryDialog.showModal();
+    showDeliveryError("Não foi possível iniciar o envio.");
+  }
+});
+document.querySelectorAll("[data-close]").forEach(button => button.addEventListener("click", () => {
+  document.getElementById(button.dataset.close).close();
+}));
+
+async function checkReceiptFolder(receiptId) {
+  if (!api() || state.busy) return;
+  historyDialog.close();
+  const operation = ++state.navigationSeq;
+  setBusy(true);
+  await nextPaint();
+  if (operation !== state.navigationSeq) return;
+  try {
+    const result = await api().open_delivery_folder(receiptId);
+    if (operation !== state.navigationSeq || result.ok) return;
+    setBusy(false);
+    notify(result.error, true);
+  } catch {
+    if (operation !== state.navigationSeq) return;
+    setBusy(false);
+    notify("Não foi possível abrir a pasta do histórico.", true);
+  }
+}
+
+function receiptRow(receipt) {
+  const labels = { sent: "Enviado", failed: "Falhou", uncertain: "A confirmar" };
+  const row = document.createElement("li");
+  const filename = document.createElement("strong");
+  const status = document.createElement("span");
+  filename.textContent = receipt.filename;
+  status.className = `receipt-status ${receipt.status}`;
+  status.textContent = labels[receipt.status] || labels.uncertain;
+  row.append(filename, status);
+  if (receipt.detail) {
+    const detail = document.createElement("small");
+    detail.className = "receipt-detail";
+    detail.textContent = receipt.detail;
+    row.append(detail);
+  }
+  return row;
+}
+
+function showDeliveryResult(notice) {
+  document.querySelector("#delivery-result-summary").textContent = notice.message;
+  document.querySelector("#delivery-result-list").replaceChildren(...notice.deliveryIssues.map(receiptRow));
+  document.querySelector("#delivery-result").showModal();
+}
+
+document.querySelector("#open-history").addEventListener("click", async () => {
+  if (historyDialog.open) return;
+  const list = document.querySelector("#history-list");
+  const message = document.querySelector("#history-message");
+  list.replaceChildren();
+  message.textContent = "Carregando histórico…";
+  historyDialog.showModal();
+  try {
+    const result = await api()?.recent_deliveries();
+    if (!result?.ok) throw Error();
+    message.textContent = result.receipts.length ? "" : "Nenhum envio registrado neste computador.";
+    list.replaceChildren(...result.receipts.map(receipt => {
+      const row = receiptRow(receipt);
+      const details = document.createElement("small");
+      details.textContent = [receipt.company, receipt.destination, new Date(receipt.recorded_at).toLocaleString("pt-BR")].join(" · ");
+      row.append(details);
+      if (receipt.status !== "sent" && receipt.canOpen && Number.isInteger(receipt.id)) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "text-button receipt-folder";
+        button.textContent = "Conferir pasta";
+        button.addEventListener("click", () => checkReceiptFolder(receipt.id));
+        row.append(button);
+      }
+      return row;
+    }));
+  } catch {
+    message.textContent = "Não foi possível carregar o histórico. Feche e tente novamente.";
+  }
+});
 
 function startUpdateStatusPolling() {
   if (updateStatusTimer !== null || !canReadUpdateStatus()) return;

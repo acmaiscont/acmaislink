@@ -7,8 +7,11 @@ snapshots. Never expose this adapter through js_api.
 """
 from __future__ import annotations
 
+import ctypes
 import json
 import threading
+from ctypes import wintypes
+from urllib.parse import urlsplit
 
 
 class NavigationWindow:
@@ -19,6 +22,7 @@ class NavigationWindow:
         self._select_company = select_company
         self._cover = None
         self._toolbar = None
+        self._loading_title = self._loading_detail = None
         self._label = None
         self._selector = None
         self._cancel = None
@@ -96,6 +100,125 @@ class NavigationWindow:
 
     def evaluate_navigation_js(self, script, is_current):
         return self.evaluate_js(script, is_current=is_current)
+
+    def delivery_cookies(self, url, is_current):
+        """Read only cookies scoped by WebView2 to this HTTPS request."""
+        done, expired = threading.Event(), threading.Event()
+        result = {}
+
+        def completed(task):
+            try:
+                result["value"] = "; ".join(
+                    f"{cookie.Name}={cookie.Value}" for cookie in task.Result
+                )
+            except Exception as exc:
+                result["error"] = exc
+            finally:
+                done.set()
+
+        def begin():
+            try:
+                if expired.is_set() or not is_current():
+                    done.set()
+                    return
+                from System import Action
+                from System.Collections.Generic import List
+                from System.Threading.Tasks import Task, TaskScheduler
+                from Microsoft.Web.WebView2.Core import CoreWebView2Cookie
+                core = self._window.native.webview.CoreWebView2
+                page = urlsplit(str(core.Source))
+                target = urlsplit(url)
+                if page.scheme != "https" or page.netloc.casefold() != target.netloc.casefold():
+                    raise RuntimeError("A sessão não está no SharePoint da empresa.")
+                manager = core.CookieManager
+                task = manager.GetCookiesAsync(url)
+                task.ContinueWith(Action[Task[List[CoreWebView2Cookie]]](completed),
+                                  TaskScheduler.FromCurrentSynchronizationContext())
+            except Exception as exc:
+                result["error"] = exc
+                done.set()
+
+        self._post(begin)
+        if not done.wait(3):
+            expired.set()
+            raise TimeoutError("O WebView2 não retornou a sessão.")
+        if "error" in result:
+            raise result["error"]
+        return result.get("value", "")
+
+    def choose_delivery_files(self):
+        from webview import FileDialog
+        return self._window.create_file_dialog(FileDialog.OPEN, allow_multiple=True)
+
+    def offer_restart(self, activity, stop, decline):
+        def close_when_ready():
+            try:
+                stop()
+                self._post(self._window.native.Close)
+            except Exception:
+                decline()
+
+        def confirm():
+            try:
+                from System.Windows.Forms import (
+                    DialogResult, MessageBox, MessageBoxButtons, MessageBoxDefaultButton, MessageBoxIcon,
+                )
+                form = self._window.native
+                cancel_picker = self._picker_cancel_action(form.Handle.ToInt64())
+                form.Activate()
+                message = activity()
+                if message and MessageBox.Show(
+                    form, f"{message}\n\nDeseja interromper a operação e reabrir o aplicativo?",
+                    "Reabrir ACMAIS LINK", MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question, MessageBoxDefaultButton.Button2,
+                ) != DialogResult.Yes:
+                    decline()
+                    return
+                if cancel_picker:
+                    cancel_picker()
+                self._background(close_when_ready)
+            except Exception:
+                decline()
+
+        self._post(confirm)
+
+    @staticmethod
+    def _picker_cancel_action(owner):
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        user32.GetWindow.argtypes = (wintypes.HWND, wintypes.UINT)
+        user32.GetWindow.restype = wintypes.HWND
+        user32.GetDlgItem.argtypes = (wintypes.HWND, ctypes.c_int)
+        user32.GetDlgItem.restype = wintypes.HWND
+        user32.PostMessageW.argtypes = (wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
+        popup = user32.GetWindow(owner, 6)  # GW_ENABLEDPOPUP
+        if not popup or popup == owner:
+            user32.GetLastActivePopup.argtypes = (wintypes.HWND,)
+            user32.GetLastActivePopup.restype = wintypes.HWND
+            popup = user32.GetLastActivePopup(owner)
+            if not popup or popup == owner:
+                return None
+        cancel = user32.GetDlgItem(popup, 2)  # IDCANCEL
+        if cancel:
+            return lambda: user32.PostMessageW(popup, 0x0111, 2, cancel)  # WM_COMMAND / IDCANCEL
+        return lambda: user32.PostMessageW(popup, 0x0010, 0, 0)  # WM_CLOSE
+
+    def choose_delivery_folder(self):
+        def pick():
+            from System.Windows.Forms import DialogResult, FolderBrowserDialog
+
+            dialog = FolderBrowserDialog()
+            try:
+                dialog.Description = "Selecione a pasta que deseja enviar e clique em OK."
+                dialog.ShowNewFolderButton = False
+                if dialog.ShowDialog(self._window.native) == DialogResult.OK:
+                    return (str(dialog.SelectedPath),)
+                return None
+            finally:
+                dialog.Dispose()
+
+        # The bridge worker waits for the user. The modal dialog runs on the
+        # WinForms UI thread and remains usable for as long as needed.
+        return self._on_ui(pick, timeout=None)
 
     def navigate(self, url, is_current):
         def load():
@@ -179,6 +302,7 @@ class NavigationWindow:
             return
         from System.Drawing import Color, ContentAlignment, Font, FontStyle
         from System.Windows.Forms import (
+            ProgressBar, ProgressBarStyle,
             AnchorStyles, Button, ColumnStyle, ComboBox, ComboBoxStyle, DockStyle,
             FlatStyle, Label, Padding, RowStyle, SizeType, TableLayoutPanel, ToolTip,
         )
@@ -188,10 +312,10 @@ class NavigationWindow:
         cover = TableLayoutPanel()
         cover.Dock = DockStyle.Fill
         cover.BackColor = Color.FromArgb(247, 248, 250)
-        cover.ColumnCount, cover.RowCount = 1, 5
+        cover.ColumnCount, cover.RowCount = 1, 6
         cover.ColumnStyles.Add(ColumnStyle(SizeType.Percent, 100))
         for size, height in ((SizeType.Percent, 50), (SizeType.AutoSize, 0),
-                             (SizeType.AutoSize, 0), (SizeType.AutoSize, 0),
+                             (SizeType.AutoSize, 0), (SizeType.AutoSize, 0), (SizeType.AutoSize, 0),
                              (SizeType.Percent, 50)):
             cover.RowStyles.Add(RowStyle(size, height))
         title = Label()
@@ -218,7 +342,16 @@ class NavigationWindow:
         cancel.Click += lambda *_: self._background(self._return_home)
         cover.Controls.Add(title, 0, 1)
         cover.Controls.Add(detail, 0, 2)
-        cover.Controls.Add(cancel, 0, 3)
+        bar = ProgressBar()
+        bar.Style = ProgressBarStyle.Continuous
+        bar.MarqueeAnimationSpeed = 30
+        bar.Anchor = getattr(AnchorStyles, 'None')
+        bar.Width, bar.Height = px(240), px(12)
+        bar.Margin = Padding(px(12), 0, px(12), px(6))
+        bar.AccessibleName = "Progresso da transferência"
+        bar.Visible = False
+        cover.Controls.Add(bar, 0, 3)
+        cover.Controls.Add(cancel, 0, 4)
 
         toolbar = TableLayoutPanel()
         toolbar.Dock = DockStyle.Top
@@ -273,12 +406,52 @@ class NavigationWindow:
         form.Controls.Add(cover)
         self._cover, self._toolbar, self._label = cover, toolbar, selector
         self._selector, self._cancel, self._tooltip = selector, cancel, tooltip
+        self._loading_title, self._loading_detail = title, detail
+        self._delivery_bar = bar
 
-    def show_loading(self, is_current):
+    def delivery_progress(self, index, total, sent, size, waiting, directory, is_current):
+        def update():
+            if is_current():
+                from System.Windows.Forms import ProgressBarStyle
+                self._loading_title.Text = "Enviando documentos…"
+                percent = (sent * 100 // size) if size else (100 if waiting else 0)
+                if directory:
+                    status = "Preparando a subpasta no SharePoint…"
+                elif waiting:
+                    status = "Transferência concluída. Confirmando no SharePoint…"
+                elif not sent:
+                    status = "Verificando o destino deste arquivo…"
+                else:
+                    status = f"{percent}% do arquivo · {sent / 1048576:.1f} de {size / 1048576:.1f} MB".replace(".", ",")
+                self._loading_detail.Text = f"Item {index} de {total}\n{status}"
+                self._delivery_bar.Visible = True
+                if directory or waiting or not sent:
+                    self._delivery_bar.Style = ProgressBarStyle.Marquee
+                else:
+                    self._delivery_bar.Style = ProgressBarStyle.Continuous
+                    self._delivery_bar.Value = min(100, percent)
+                self._cancel.Text = "Cancelar envio"
+                self._cancel.AccessibleName = "Cancelar envio"
+        self._on_ui(update)
+
+    def show_loading(self, is_current, *, delivery=False):
         def show():
             if not is_current():
                 return False
             self._create_controls()
+            if self._loading_title is not None:
+                if delivery:
+                    from System.Windows.Forms import ProgressBarStyle
+                    self._loading_title.Text = "Preparando envio…"
+                    self._loading_detail.Text = "Conectando ao SharePoint e conferindo a pasta de destino."
+                    self._cancel.Text = self._cancel.AccessibleName = "Cancelar envio"
+                    self._delivery_bar.Style = ProgressBarStyle.Marquee
+                else:
+                    self._loading_title.Text = "Abrindo documentos…"
+                    self._loading_detail.Text = "Conectando ao SharePoint e validando a pasta.\nVocê pode cancelar a qualquer momento."
+                    self._cancel.Text = "Cancelar e voltar às empresas"
+                    self._cancel.AccessibleName = "Cancelar abertura e voltar às empresas"
+                self._delivery_bar.Visible = delivery
             self._toolbar.Visible = False
             self._cover.Visible = True
             self._cover.BringToFront()

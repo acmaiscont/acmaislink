@@ -3,7 +3,7 @@ Unicode true
 !include "LogicLib.nsh"
 !include "x64.nsh"
 !ifndef VERSION
-  !define VERSION "1.0.0"
+  !error "A versao e obrigatoria. Use scripts/package.ps1."
 !endif
 !ifndef FLAVOR
   !define FLAVOR "update"
@@ -13,20 +13,22 @@ Var AppMutex
 Var StageDir
 Var BackupDir
 Var ExistingMoved
-Name "ACMAIS LINK"
+!define APP_NAME "ACMAIS LINK"
+Name "${APP_NAME}"
 OutFile "..\artifacts\ACMAIS-LINK-${VERSION}-x64-${FLAVOR}.exe"
-InstallDir "$LOCALAPPDATA\Programs\ACMAIS LINK"
+InstallDir "$LOCALAPPDATA\Programs\${APP_NAME}"
 RequestExecutionLevel user
 SetCompressor lzma
 SetCompressorDictSize 32
 VIProductVersion "${VERSION}.0"
-VIAddVersionKey /LANG=1046 "ProductName" "ACMAIS LINK"
+VIAddVersionKey /LANG=1046 "ProductName" "${APP_NAME}"
 VIAddVersionKey /LANG=1046 "FileDescription" "Instalador ACMAIS LINK"
 VIAddVersionKey /LANG=1046 "FileVersion" "${VERSION}"
+VIAddVersionKey /LANG=1046 "ProductVersion" "${VERSION}"
 VIAddVersionKey /LANG=1046 "LegalCopyright" "ACMAIS"
 !define MUI_ICON "..\src\acmais_link\assets\logo.ico"
 !define MUI_ABORTWARNING
-!define MUI_FINISHPAGE_RUN "$INSTDIR\versions\${VERSION}\ACMAIS LINK.exe"
+!define MUI_FINISHPAGE_RUN "$INSTDIR\versions\${VERSION}\${APP_NAME}.exe"
 !define MUI_FINISHPAGE_RUN_TEXT "Abrir ACMAIS LINK"
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_INSTFILES
@@ -43,7 +45,7 @@ Function .onInit
     MessageBox MB_ICONSTOP "Este pacote requer Windows 10/11 de 64 bits." /SD IDOK
     Abort
   ${EndIf}
-  ${If} $INSTDIR != "$LOCALAPPDATA\Programs\ACMAIS LINK"
+  ${If} $INSTDIR != "$LOCALAPPDATA\Programs\${APP_NAME}"
     SetErrorLevel 1
     MessageBox MB_ICONSTOP "O ACMAIS LINK deve ser instalado na pasta padrão deste usuário. Execute o instalador sem alterar o diretório de destino." /SD IDOK
     Abort
@@ -119,8 +121,8 @@ Section "Instalar"
       ${EndIf}
     !else
       SetErrorLevel 3
-      MessageBox MB_YESNO|MB_ICONINFORMATION "Este computador ainda não tem o Microsoft WebView2, necessário para abrir o ACMAIS LINK.$\r$\n$\r$\nBaixe o instalador completo: ACMAIS-LINK-${VERSION}-x64-full.exe. Ele já inclui esse componente.$\r$\n$\r$\nDeseja abrir a página oficial de downloads?" /SD IDNO IDNO runtime_missing
-      ExecShell "open" "https://github.com/acmaiscont/acmaislink/releases"
+      MessageBox MB_YESNO|MB_ICONINFORMATION "Este computador ainda não tem o Microsoft WebView2.$\r$\nBaixe o instalador completo: ACMAIS-LINK-${VERSION}-x64-full.exe.$\r$\nDeseja abrir a página oficial de downloads?" /SD IDNO IDNO runtime_missing
+      ExecShell "open" "https://github.com/acmaiscont/acmaislink/releases/latest"
       runtime_missing:
       Abort
     !endif
@@ -211,23 +213,30 @@ Section "Instalar"
     MessageBox MB_ICONSTOP "Não foi possível concluir a instalação. A edição anterior, se existente, foi preservada. Tente novamente." /SD IDOK
     Abort
   ${EndIf}
-  CreateDirectory "$SMPROGRAMS\ACMAIS LINK"
-  CreateShortcut "$SMPROGRAMS\ACMAIS LINK\ACMAIS LINK.lnk" "$INSTDIR\versions\${VERSION}\ACMAIS LINK.exe"
-  CreateShortcut "$DESKTOP\ACMAIS LINK.lnk" "$INSTDIR\versions\${VERSION}\ACMAIS LINK.exe"
+  ClearErrors
+  CreateDirectory "$SMPROGRAMS\${APP_NAME}"
+  CreateShortcut "$SMPROGRAMS\${APP_NAME}\${APP_NAME}.lnk" "$INSTDIR\versions\${VERSION}\${APP_NAME}.exe"
+  CreateShortcut "$DESKTOP\${APP_NAME}.lnk" "$INSTDIR\versions\${VERSION}\${APP_NAME}.exe"
   WriteUninstaller "$INSTDIR\Desinstalar.exe"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ACMAIS LINK" "DisplayName" "ACMAIS LINK"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ACMAIS LINK" "DisplayVersion" "${VERSION}"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ACMAIS LINK" "Publisher" "ACMAIS"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ACMAIS LINK" "UninstallString" '"$INSTDIR\Desinstalar.exe"'
-  WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ACMAIS LINK" "NoModify" 1
-  WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ACMAIS LINK" "NoRepair" 1
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}" "DisplayName" "${APP_NAME}"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}" "DisplayVersion" "${VERSION}"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}" "Publisher" "ACMAIS"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}" "UninstallString" '"$INSTDIR\Desinstalar.exe"'
+  WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}" "NoModify" 1
+  WriteRegDWORD HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}" "NoRepair" 1
+  ${If} ${Errors}
+    Call ReleaseAppMutex
+    SetErrorLevel 1
+    MessageBox MB_ICONSTOP "O aplicativo foi copiado, mas não foi possível atualizar os atalhos ou o registro de instalação. Execute o instalador novamente." /SD IDOK
+    Abort
+  ${EndIf}
   ; Release before the finish page so its Run action can open the installed app.
   Call ReleaseAppMutex
 SectionEnd
 
 Section "Uninstall"
   SetShellVarContext current
-  StrCmp $INSTDIR "$LOCALAPPDATA\Programs\ACMAIS LINK" +3
+  StrCmp $INSTDIR "$LOCALAPPDATA\Programs\${APP_NAME}" +3
     MessageBox MB_ICONSTOP "Diretório de instalação inesperado. Desinstalação cancelada."
     Abort
   System::Call 'kernel32::OpenMutexW(i 0x100000, i 0, w "Local\ACMAIS_LINK_SingleInstance") p .r0'
@@ -237,10 +246,10 @@ Section "Uninstall"
     Abort
   ${EndIf}
   RMDir /r "$INSTDIR\versions"
-  Delete "$DESKTOP\ACMAIS LINK.lnk"
-  Delete "$SMPROGRAMS\ACMAIS LINK\ACMAIS LINK.lnk"
-  RMDir "$SMPROGRAMS\ACMAIS LINK"
-  DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\ACMAIS LINK"
+  Delete "$DESKTOP\${APP_NAME}.lnk"
+  Delete "$SMPROGRAMS\${APP_NAME}\${APP_NAME}.lnk"
+  RMDir "$SMPROGRAMS\${APP_NAME}"
+  DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP_NAME}"
   Delete "$INSTDIR\Desinstalar.exe"
   RMDir "$INSTDIR"
   ; Company configuration, passwords and WebView2 remain available for reinstallation.

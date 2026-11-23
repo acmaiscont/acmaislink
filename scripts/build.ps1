@@ -28,6 +28,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Testes reprovados.' }
     & $Python -m PyInstaller --noconfirm --distpath "release-v$version" --workpath "build-v$version" 'ACMAIS_LINK.spec'
     if ($LASTEXITCODE -ne 0) { throw 'Falha no PyInstaller.' }
+    . "$PSScriptRoot\sign-local.ps1"
+    Protect-AcmaisExecutable -Path (Join-Path $outputDir 'ACMAIS LINK\ACMAIS LINK.exe')
     & $Python scripts/verify_release.py record
     if ($LASTEXITCODE -ne 0) { throw 'Os arquivos mudaram durante a compilação.' }
 }

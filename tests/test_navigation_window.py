@@ -73,6 +73,21 @@ class NavigationWindowTests(unittest.TestCase):
         self.assertTrue(self.window.navigate('file:///home/index.html', lambda: True))
         self.raw.load_url.assert_called_once_with('file:///home/index.html')
 
+    def test_folder_selection_uses_owner_and_distinguishes_confirmation_from_cancel(self):
+        folder = r'C:\Documents\Extratos'
+        forms = types.ModuleType('System.Windows.Forms')
+        forms.DialogResult = types.SimpleNamespace(OK=1)
+        for result, expected in ((1, (folder,)), (2, None)):
+            with self.subTest(result=result):
+                dialog = Mock(SelectedPath=folder)
+                dialog.ShowDialog.return_value = result
+                forms.FolderBrowserDialog = Mock(return_value=dialog)
+                with patch.dict(sys.modules, {'System.Windows.Forms': forms}):
+                    self.assertEqual(self.window.choose_delivery_folder(), expected)
+                dialog.ShowDialog.assert_called_once_with(self.raw.native)
+                dialog.Dispose.assert_called_once()
+        self.raw.create_file_dialog.assert_not_called()
+
     def test_native_task_failure_and_malformed_result_release_waiter(self):
         for task in (TaskResult(error=RuntimeError('disposed')), TaskResult('{')):
             with self.subTest(task=task):
@@ -131,6 +146,26 @@ class NavigationWindowTests(unittest.TestCase):
         self.window._cover, self.window._toolbar = Mock(), Mock()
         self.window._cover.Refresh.side_effect = cancel
         self.assertFalse(self.window.show_loading(lambda: current))
+
+    def test_delivery_progress_is_visible_during_preparation_transfer_and_confirmation(self):
+        forms = types.ModuleType('System.Windows.Forms')
+        forms.ProgressBarStyle = types.SimpleNamespace(Marquee=1, Continuous=2)
+        self.window._create_controls = Mock()
+        self.window._cover, self.window._toolbar = Mock(), Mock()
+        self.window._loading_title, self.window._loading_detail = Mock(), Mock()
+        self.window._cancel, self.window._delivery_bar = Mock(), Mock()
+        current = lambda: True
+        with patch.dict(sys.modules, {'System.Windows.Forms': forms}):
+            self.assertTrue(self.window.show_loading(current, delivery=True))
+            self.assertTrue(self.window._delivery_bar.Visible)
+            self.assertEqual(self.window._delivery_bar.Style, forms.ProgressBarStyle.Marquee)
+            self.window.delivery_progress(1, 3, 512, 1024, False, False, current)
+            self.assertEqual(self.window._delivery_bar.Style, forms.ProgressBarStyle.Continuous)
+            self.assertEqual(self.window._delivery_bar.Value, 50)
+            self.assertIn('50%', self.window._loading_detail.Text)
+            self.window.delivery_progress(1, 3, 1024, 1024, True, False, current)
+            self.assertEqual(self.window._delivery_bar.Style, forms.ProgressBarStyle.Marquee)
+            self.assertIn('Confirmando no SharePoint', self.window._loading_detail.Text)
 
     def test_paint_failure_does_not_acknowledge_loading(self):
         self.window._create_controls = Mock()

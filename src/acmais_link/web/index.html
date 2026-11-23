@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ACMAIS LINK</title>
-  <link rel="stylesheet" href="style.css?v=1.0.0&ui=20260915">
+  <title>ACMAIS LINK · v__ACMAIS_VERSION__</title>
+  <link rel="stylesheet" href="style.css?v=__ACMAIS_VERSION__">
 </head>
 <body>
   <header class="topbar">
@@ -15,7 +15,10 @@
         <h1>ACMAIS LINK</h1>
       </div>
     </div>
-    <button class="primary" id="add-company">+ Adicionar empresa</button>
+    <div class="header-actions">
+      <button class="ghost" id="open-history">Histórico</button>
+      <button class="primary" id="add-company">+ Adicionar empresa</button>
+    </div>
   </header>
 
   <main>
@@ -23,7 +26,7 @@
       <div>
         <p class="eyebrow">SEUS AMBIENTES EM UM SÓ LUGAR</p>
         <h2>Documentos da sua empresa</h2>
-        <p>Selecione uma empresa para abrir o ambiente seguro no SharePoint.</p>
+        <p>Escolha uma empresa para enviar arquivos ou consultar seus documentos.</p>
       </div>
       <div class="search-wrap">
         <label for="search">Buscar empresa</label>
@@ -52,8 +55,8 @@
 
   <footer class="app-footer">
     <div class="footer-line">
-      <span>ACMAIS LINK · v1.0.0</span>
-      <span id="update-status" role="status" aria-live="polite">Atualizações automáticas</span>
+      <span id="app-identity">ACMAIS LINK · v__ACMAIS_VERSION__</span>
+      <span id="update-status" role="status" aria-live="polite">Consultando atualizações…</span>
     </div>
   </footer>
 
@@ -83,6 +86,79 @@
     </form>
   </dialog>
 
+  <dialog id="delivery-dialog" aria-labelledby="delivery-title">
+    <form id="delivery-form">
+      <div class="dialog-heading">
+        <div>
+          <h2 id="delivery-title">Enviar documentos</h2>
+          <p id="delivery-company" class="dialog-subtitle"></p>
+        </div>
+        <button class="icon-button" type="button" data-close="delivery-dialog" aria-label="Fechar">×</button>
+      </div>
+      <div class="dialog-body">
+        <p id="delivery-error" class="form-error" role="alert" hidden></p>
+        <div class="delivery-files">
+          <button class="ghost" id="choose-delivery-files" type="button">Selecionar arquivos</button>
+          <button class="ghost" id="choose-delivery-folder" type="button">Selecionar pasta</button>
+          <p id="delivery-files-summary" role="status">Até 30 arquivos avulsos ou 300 itens por pasta. Limite de 100 MB por arquivo.</p>
+          <ul id="delivery-files-list" hidden></ul>
+        </div>
+        <div class="delivery-fields">
+          <label>Setor <select id="delivery-sector" required></select></label>
+          <label>Tipo de documento <select id="delivery-kind" required></select></label>
+          <div class="delivery-period-field">
+            <label>Competência <input id="delivery-period" type="month" min="2000-01" max="2099-12" required></label>
+            <div class="period-shortcuts">
+              <button class="ghost" type="button" data-period="currentPeriod" disabled>Esse mês</button>
+              <button class="ghost" type="button" data-period="previousPeriod" disabled>Mês anterior</button>
+            </div>
+          </div>
+        </div>
+        <p id="delivery-suggestion" class="dialog-subtitle" role="status" hidden></p>
+      </div>
+      <div class="dialog-actions delivery-actions">
+        <div class="delivery-destination" id="delivery-destination" hidden>
+          <strong>Destino</strong>
+          <span id="delivery-path"></span>
+        </div>
+        <button class="ghost" type="button" data-close="delivery-dialog">Cancelar</button>
+        <button class="primary" id="submit-delivery" type="submit" disabled>Enviar documentos</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="delivery-result" aria-labelledby="delivery-result-title">
+    <form method="dialog">
+      <div class="dialog-heading">
+        <h2 id="delivery-result-title">Resultado do envio</h2>
+        <button class="icon-button" type="submit" aria-label="Fechar">×</button>
+      </div>
+      <div class="dialog-body">
+        <p id="delivery-result-summary"></p>
+        <ul id="delivery-result-list" class="history-list"></ul>
+      </div>
+      <div class="dialog-actions">
+        <button class="primary" type="submit">Fechar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="history-dialog" aria-labelledby="history-title">
+    <form method="dialog">
+      <div class="dialog-heading">
+        <div>
+          <h2 id="history-title">Histórico de envios</h2>
+          <p class="dialog-subtitle">Registros recentes deste computador</p>
+        </div>
+        <button class="icon-button" type="submit" aria-label="Fechar">×</button>
+      </div>
+      <div class="dialog-body">
+        <p id="history-message" role="status"></p>
+        <ul id="history-list" class="history-list"></ul>
+      </div>
+    </form>
+  </dialog>
+
   <dialog id="confirm-dialog" class="confirm-dialog" aria-labelledby="confirm-title">
     <form method="dialog">
       <div class="dialog-body">
@@ -105,6 +181,6 @@
       <button class="ghost" id="cancel-opening" type="button">Cancelar abertura</button>
     </div>
   </div>
-  <script src="app.js?v=1.0.0&ui=20260915"></script>
+  <script src="app.js?v=__ACMAIS_VERSION__"></script>
 </body>
 </html>

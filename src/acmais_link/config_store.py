@@ -10,7 +10,7 @@ from .models import Company
 
 
 class ConfigStore:
-    """Atomic store for non-sensitive company configuration."""
+    """Atomic store for company configuration and confidential sharing links."""
 
     def __init__(self, path: Path):
         self.path = path
@@ -54,7 +54,7 @@ class ConfigStore:
             return {"version": 1, "companies": []}
         with self.path.open("r", encoding="utf-8") as stream:
             data = json.load(stream)
-        if data.get("version") != 1 or not isinstance(data.get("companies"), list):
+        if not isinstance(data, dict) or data.get("version") != 1 or not isinstance(data.get("companies"), list):
             raise ValueError("O arquivo de configuração possui um formato incompatível.")
         return data
 
