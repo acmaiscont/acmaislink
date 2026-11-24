@@ -84,8 +84,10 @@ integração no site atual; sua criação não altera hospedagem nem DNS.
    como estável no repositório de produção: todos os clientes instalados consultarão esse canal.
 4. Definir assinatura de código Windows. Os EXEs ACMAIS atuais não são assinados;
    o Windows pode apresentar SmartScreen. O WebView2 incluído é assinado pela Microsoft.
-5. Criar a tag da versão e a Release inicialmente em draft, anexando os dois instaladores
-   e SHA256SUMS. Conferir hashes, notas e nomes antes de publicar como estável.
+5. Criar a tag da versão e a Release inicialmente em draft. Anexar os dois instaladores
+   versionados, `ACMAIS-LINK-x64-full.exe` e `SHA256SUMS.txt`. O arquivo com nome fixo
+   é uma cópia do instalador completo para o link direto do site. Conferir hashes,
+   notas e nomes antes de publicar como estável.
 6. Nas próximas versões, manter exatamente `ACMAIS-LINK-<versão>-x64-update.exe`.
    O GitHub precisa fornecer `digest: sha256:...` no asset. Sem digest, o app recusa.
 

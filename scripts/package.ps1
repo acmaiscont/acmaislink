@@ -24,7 +24,12 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "Falha ao gerar pacote $flavor." }
         Protect-AcmaisExecutable -Path "artifacts\ACMAIS-LINK-$version-x64-$flavor.exe"
     }
-    $hashes = Get-FileHash "artifacts\ACMAIS-LINK-$version-x64-*.exe" -Algorithm SHA256
+    $fullPackage = "artifacts\ACMAIS-LINK-$version-x64-full.exe"
+    $websitePackage = 'artifacts\ACMAIS-LINK-x64-full.exe'
+    Copy-Item -LiteralPath $fullPackage -Destination $websitePackage -Force
+    $hashes = Get-FileHash -LiteralPath @(
+        "artifacts\ACMAIS-LINK-$version-x64-update.exe", $fullPackage, $websitePackage
+    ) -Algorithm SHA256
     $hashes | ForEach-Object { "$($_.Hash.ToLowerInvariant())  $([IO.Path]::GetFileName($_.Path))" } |
         Set-Content "artifacts\SHA256SUMS.txt" -Encoding utf8
 } finally { $env:NSISDIR = $previousNsisDir; Pop-Location }
