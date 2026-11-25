@@ -2,11 +2,9 @@ Unicode true
 !include "MUI2.nsh"
 !include "LogicLib.nsh"
 !include "x64.nsh"
+!define WEBVIEW2_KEY "SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
 !ifndef VERSION
   !error "A versao e obrigatoria. Use scripts/package.ps1."
-!endif
-!ifndef FLAVOR
-  !define FLAVOR "update"
 !endif
 Var InstallerMutex
 Var AppMutex
@@ -15,7 +13,7 @@ Var BackupDir
 Var ExistingMoved
 !define APP_NAME "ACMAIS LINK"
 Name "${APP_NAME}"
-OutFile "..\artifacts\ACMAIS-LINK-${VERSION}-x64-${FLAVOR}.exe"
+OutFile "..\artifacts\ACMAIS-LINK-${VERSION}-x64-update.exe"
 InstallDir "$LOCALAPPDATA\Programs\${APP_NAME}"
 RequestExecutionLevel user
 SetCompressor lzma
@@ -89,43 +87,21 @@ Function .onGUIEnd
   ${EndIf}
 FunctionEnd
 
-Function CheckRuntime
-  StrCpy $0 ""
-  SetRegView 32
-  ReadRegStr $0 HKLM "SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" "pv"
-  ${If} $0 == ""
-  ${OrIf} $0 == "0.0.0.0"
-    ReadRegStr $0 HKCU "SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" "pv"
-  ${EndIf}
-FunctionEnd
+!include "webview2.nsh"
 
 Section "Instalar"
   SetShellVarContext current
   Call CheckRuntime
   ${If} $0 == ""
-  ${OrIf} $0 == "0.0.0.0"
-    !if "${FLAVOR}" == "full"
-      InitPluginsDir
-      SetOutPath "$PLUGINSDIR"
-      SetCompress off
-      File "..\.tools\MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
-      SetCompress auto
-      DetailPrint "Instalando Microsoft WebView2. Aguarde..."
-      ExecWait '"$PLUGINSDIR\MicrosoftEdgeWebView2RuntimeInstallerX64.exe" /silent /install' $1
-      Call CheckRuntime
-      ${If} $0 == ""
-      ${OrIf} $0 == "0.0.0.0"
-        SetErrorLevel 3
-        MessageBox MB_ICONSTOP "O Microsoft WebView2 não foi instalado (código $1). Reinicie o Windows e execute novamente este pacote completo. Se o problema continuar, solicite ajuda ao suporte." /SD IDOK
-        Abort
-      ${EndIf}
-    !else
-      SetErrorLevel 3
-      MessageBox MB_YESNO|MB_ICONINFORMATION "Este computador ainda não tem o Microsoft WebView2.$\r$\nBaixe o instalador completo: ACMAIS-LINK-${VERSION}-x64-full.exe.$\r$\nDeseja abrir a página oficial de downloads?" /SD IDNO IDNO runtime_missing
-      ExecShell "open" "https://github.com/acmaiscont/acmaislink/releases/latest"
-      runtime_missing:
-      Abort
-    !endif
+    InitPluginsDir
+    SetOutPath "$PLUGINSDIR"
+    ClearErrors
+    File "..\.tools\MicrosoftEdgeWebview2Setup.exe"
+    ${If} ${Errors}
+      StrCpy $1 "não foi possível preparar o instalador"
+      Call WebView2InstallFailed
+    ${EndIf}
+    Call InstallWebView2
   ${EndIf}
   wait_app:
   ; Hold the same mutex as the app until installation ends, closing the race

@@ -4,8 +4,9 @@ Aplicativo desktop para reunir os acessos de várias empresas aos respectivos am
 
 ## Distribuição
 
-Os instaladores são distribuídos pelo [GitHub Releases](https://github.com/acmaiscont/acmaislink/releases/latest).
-O pacote `full` inclui WebView2 offline e o pacote `update` serve para quem já possui o runtime.
+O instalador é distribuído pelo [GitHub Releases](https://github.com/acmaiscont/acmaislink/releases/latest).
+O instalador inclui o bootstrapper oficial do WebView2. Se o runtime estiver
+ausente, o bootstrapper baixa e instala o componente silenciosamente pela internet.
 O aplicativo instalado consulta e baixa atualizações em segundo plano e aplica a atualização ao fechar.
 Consulte [preparação de lançamento](docs/RELEASE.md),
 [alterações](CHANGELOG.md) e [segurança](SECURITY.md).
@@ -30,7 +31,8 @@ Consulte [preparação de lançamento](docs/RELEASE.md),
 .\scripts\run.ps1
 ```
 
-O Microsoft WebView2 Runtime deve estar instalado. Ter o navegador Edge não comprova a presença do runtime; o pacote completo instala o componente quando necessário.
+O Microsoft WebView2 Runtime deve estar instalado para executar o aplicativo.
+O instalador do ACMAIS LINK configura o componente quando necessário.
 
 Se a aplicação não conseguir iniciar, ela exibirá uma mensagem e gravará o diagnóstico em `%TEMP%\ACMAIS_LINK_startup_error.log`.
 
@@ -50,7 +52,7 @@ Para mudar a versão, edite apenas `__version__` em
 `src/acmais_link/__init__.py` e execute a compilação. O build gera o HTML do
 rodapé, o endereço local de cada versão e os metadados do executável.
 O resultado fica em `release-v<versão>\ACMAIS LINK\ACMAIS LINK.exe`.
-Para gerar instaladores, execute `scripts/prepare-tools.ps1` e `scripts/package.ps1`.
+Para gerar o instalador, execute `scripts/prepare-tools.ps1` e `scripts/package.ps1`.
 
 ## Dados locais
 

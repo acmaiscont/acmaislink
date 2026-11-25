@@ -9,8 +9,8 @@ try {
     }
     tar -xzf '.tools\nsis-bundle-3.12.tar.gz' -C '.tools\nsis-current'
     if ($LASTEXITCODE -ne 0) { throw 'Falha ao extrair NSIS.' }
-    Invoke-WebRequest 'https://go.microsoft.com/fwlink/?linkid=2124701' -OutFile '.tools\MicrosoftEdgeWebView2RuntimeInstallerX64.exe'
-    $signature = Get-AuthenticodeSignature '.tools\MicrosoftEdgeWebView2RuntimeInstallerX64.exe'
+    Invoke-WebRequest 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' -OutFile '.tools\MicrosoftEdgeWebview2Setup.exe'
+    $signature = Get-AuthenticodeSignature '.tools\MicrosoftEdgeWebview2Setup.exe'
     if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') {
         throw 'Assinatura Microsoft inválida.'
     }

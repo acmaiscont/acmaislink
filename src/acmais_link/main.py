@@ -55,7 +55,7 @@ def main() -> None:
     if not webview_available():
         import ctypes
         ctypes.windll.user32.MessageBoxW(None,
-            "O Microsoft WebView2 não está instalado.\nUse o pacote completo (full) do ACMAIS LINK para instalar o componente.",
+            "O Microsoft Edge WebView2 Runtime não está instalado.\nExecute o instalador do ACMAIS LINK com acesso à internet para instalar o componente.",
             "ACMAIS LINK", 0x10)
         instance.close()
         return

@@ -1,5 +1,11 @@
 # Alterações
 
+## 1.1.2
+
+- Um único instalador para a primeira instalação e as atualizações.
+- O instalador procura o WebView2 no Registro e, quando necessário, baixa o runtime pelo bootstrapper oficial da Microsoft. Essa instalação requer internet.
+- O download para o site usa o nome `Instalar-ACMAIS-LINK.exe`.
+
 ## 1.1.1
 
 - Cadastro de várias empresas a partir de um link e uma senha de grupo no SharePoint.

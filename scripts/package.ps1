@@ -9,7 +9,7 @@ try {
     if ($LASTEXITCODE -ne 0 -or $version -notmatch '^\d+\.\d+\.\d+$') { throw 'Versão inválida.' }
     & '.\.venv\Scripts\python.exe' scripts/verify_release.py verify
     if ($LASTEXITCODE -ne 0) { throw 'Recompile o projeto antes de gerar os pacotes.' }
-    $runtime = Join-Path $projectRoot '.tools\MicrosoftEdgeWebView2RuntimeInstallerX64.exe'
+    $runtime = Join-Path $projectRoot '.tools\MicrosoftEdgeWebview2Setup.exe'
     $signature = Get-AuthenticodeSignature -LiteralPath $runtime
     if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') {
         throw 'Instalador do WebView2 sem assinatura válida da Microsoft.'
@@ -19,17 +19,15 @@ try {
     if ($env:ACMAIS_SIGNING_THUMBPRINT) {
         Assert-AcmaisSignature -Path "release-v$version\ACMAIS LINK\ACMAIS LINK.exe"
     }
-    $packages = @()
-    foreach ($flavor in @('update', 'full')) {
-        & $Nsis '/INPUTCHARSET' 'UTF8' "/DVERSION=$version" "/DFLAVOR=$flavor" 'installer\acmais.nsi'
-        if ($LASTEXITCODE -ne 0) { throw "Falha ao gerar pacote $flavor." }
-        $versionedPackage = "artifacts\ACMAIS-LINK-$version-x64-$flavor.exe"
-        $websitePackage = "artifacts\ACMAIS-LINK-x64-$flavor.exe"
-        Protect-AcmaisExecutable -Path $versionedPackage
-        Copy-Item -LiteralPath $versionedPackage -Destination $websitePackage -Force
-        $packages += @($versionedPackage, $websitePackage)
-    }
-    $hashes = Get-FileHash -LiteralPath $packages -Algorithm SHA256
+    & $Nsis '/INPUTCHARSET' 'UTF8' "/DVERSION=$version" 'installer\acmais.nsi'
+    if ($LASTEXITCODE -ne 0) { throw 'Falha ao gerar o instalador.' }
+    $versionedPackage = "artifacts\ACMAIS-LINK-$version-x64-update.exe"
+    $websitePackage = 'artifacts\Instalar-ACMAIS-LINK.exe'
+    $existingWebsiteLink = 'artifacts\ACMAIS-LINK-x64-update.exe'
+    Protect-AcmaisExecutable -Path $versionedPackage
+    Copy-Item -LiteralPath $versionedPackage -Destination $websitePackage -Force
+    Copy-Item -LiteralPath $versionedPackage -Destination $existingWebsiteLink -Force
+    $hashes = Get-FileHash -LiteralPath @($versionedPackage, $websitePackage, $existingWebsiteLink) -Algorithm SHA256
     $hashes | ForEach-Object { "$($_.Hash.ToLowerInvariant())  $([IO.Path]::GetFileName($_.Path))" } |
         Set-Content "artifacts\SHA256SUMS.txt" -Encoding utf8
 } finally { $env:NSISDIR = $previousNsisDir; Pop-Location }

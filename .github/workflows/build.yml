@@ -26,7 +26,7 @@ jobs:
       - name: Preparar compilador e WebView2
         shell: pwsh
         run: ./scripts/prepare-tools.ps1
-      - name: Gerar dois instaladores
+      - name: Gerar instalador
         shell: pwsh
         run: ./scripts/package.ps1
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

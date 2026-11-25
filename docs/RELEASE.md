@@ -2,15 +2,19 @@
 
 O repositório de distribuição é https://github.com/acmaiscont/acmaislink.
 O aplicativo consulta apenas Releases públicas estáveis.
-A atualização pública de 1.1.0 é diretamente para 1.1.1. Os instaladores de
+A atualização pública de 1.1.1 é diretamente para 1.1.2. Os instaladores de
 homologação com perfil separado não fazem parte da distribuição.
 
 ## Pacotes
 
 | Arquivo | Uso |
 | --- | --- |
-| ACMAIS-LINK-1.1.1-x64-full.exe | Primeira instalação. Inclui o instalador offline do Microsoft WebView2. |
-| ACMAIS-LINK-1.1.1-x64-update.exe | Instalação leve ou atualização. Exige WebView2 já instalado. |
+| ACMAIS-LINK-<versão>-x64-update.exe | Instalador único para primeira instalação e atualização. |
+| Instalar-ACMAIS-LINK.exe | Mesmo instalador com o nome mostrado no download do site. |
+| ACMAIS-LINK-x64-update.exe | Cópia para o endereço de download já divulgado. |
+
+O instalador usa o bootstrapper da Microsoft quando o WebView2 está ausente.
+Essa etapa precisa de internet.
 
 Windows 10/11 x64. Instalação por usuário em `%LOCALAPPDATA%\Programs\ACMAIS LINK`.
 Atalhos na área de trabalho e menu Iniciar. Na instalação manual, o assistente
@@ -64,7 +68,7 @@ sem login, repositório e Releases precisam ser públicos.
 2. `python -m pip install --no-deps -e .`
 3. Executar `scripts/prepare-tools.ps1` (NSIS 3.12 com hash fixado; WebView2 com assinatura Microsoft validada).
 4. Executar `scripts/build.ps1` e `scripts/package.ps1`.
-5. Conferir os dois EXEs e `artifacts/SHA256SUMS.txt`.
+5. Conferir que todos os nomes do instalador têm o mesmo hash em `artifacts/SHA256SUMS.txt`.
 
 O workflow manual gera artefatos de revisão, sem publicar Releases.
 O build registra `release-v<versão>/source-manifest.json` e o empacotamento exige
@@ -77,26 +81,26 @@ A página estática de downloads fica em `site-downloads/dist/`, pronta para
 integração no site atual; sua criação não altera hospedagem nem DNS.
 
 1. Revisar código e documentos; enviar apenas arquivos versionados para `main`.
-2. Validar o pacote completo em VM Windows sem WebView2 e o leve em VM com WebView2.
+2. Validar o mesmo instalador em VMs Windows com e sem WebView2.
 3. Testar atualização real de 1.1.0 para uma versão posterior em ambiente de teste:
    download sem prompts, uso de documentos preservado, aplicação silenciosa ao
    fechar e próxima abertura na nova versão. Não publicar uma Release de teste
    como estável no repositório de produção: todos os clientes instalados consultarão esse canal.
 4. Definir assinatura de código Windows. Os EXEs ACMAIS atuais não são assinados;
    o Windows pode apresentar SmartScreen. O WebView2 incluído é assinado pela Microsoft.
-5. Criar a tag da versão e a Release inicialmente em draft. Anexar os dois instaladores
-   versionados, `ACMAIS-LINK-x64-full.exe`, `ACMAIS-LINK-x64-update.exe` e
-   `SHA256SUMS.txt`. Os arquivos com nome fixo são cópias dos instaladores completo
-   e leve para os links diretos do site. Conferir hashes, notas e nomes antes de
-   publicar como estável.
+5. Criar a tag da versão e a Release inicialmente em draft. Anexar o instalador
+   versionado, `Instalar-ACMAIS-LINK.exe`, `ACMAIS-LINK-x64-update.exe` e
+   `SHA256SUMS.txt`. No site, use o
+   [link direto do instalador](https://github.com/acmaiscont/acmaislink/releases/latest/download/Instalar-ACMAIS-LINK.exe).
+   Conferir hashes, notas e nomes antes de publicar como estável.
 6. Nas próximas versões, manter exatamente `ACMAIS-LINK-<versão>-x64-update.exe`.
    O GitHub precisa fornecer `digest: sha256:...` no asset. Sem digest, o app recusa.
 
 ## Limites da validação local
 
 A máquina de desenvolvimento já possui WebView2. Não remover o runtime compartilhado
-para simular ausência. O caminho de ausência é verificado por testes e revisão,
-mas instalar o runtime offline em um Windows limpo exige a VM acima.
+para simular ausência. Os testes locais simulam esse fluxo. A instalação pelo
+bootstrapper real exige uma VM Windows sem o runtime e com acesso à internet.
 
 Referências: [modo silencioso NSIS](https://nsis.sourceforge.io/Docs/Chapter3.html)
 e [ciclo de execução pywebview](https://pywebview.flowrl.com/guide/usage).

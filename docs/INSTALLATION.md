@@ -13,9 +13,11 @@ O uso normal não requer privilégios administrativos.
 ## Distribuição
 
 Execute `scripts\build.ps1` e `scripts\package.ps1` após preparar as ferramentas.
-Os instaladores `full` e `update` ficam em `artifacts`. O completo inclui WebView2
-offline; o leve exige o runtime existente. Ambos instalam por usuário e criam
-atalhos. Consulte [lançamento](RELEASE.md) para validações e aprovação pendentes.
+O instalador fica em `artifacts`. A instalação verifica o
+WebView2 no Registro do Windows para o computador e para o usuário atual. Caso
+falte, o bootstrapper da Microsoft usa a internet para instalar o componente
+silenciosamente. O mesmo pacote serve para primeira instalação e atualização,
+instala o aplicativo por usuário e cria atalhos.
 
 ## Atualização
 
