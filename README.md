@@ -4,7 +4,9 @@ Aplicativo desktop para reunir os acessos de várias empresas aos respectivos am
 
 ## Distribuição
 
-O instalador é distribuído pelo [GitHub Releases](https://github.com/acmaiscont/acmaislink/releases/latest).
+Versão pública atual: [1.1.3](https://github.com/acmaiscont/acmaislink/releases/tag/v1.1.3).
+O [download direto de Instalar-ACMAIS-LINK.exe](https://github.com/acmaiscont/acmaislink/releases/latest/download/Instalar-ACMAIS-LINK.exe)
+acompanha a versão pública mais recente.
 O instalador inclui o bootstrapper oficial do WebView2. Se o runtime estiver
 ausente, o bootstrapper baixa e instala o componente silenciosamente pela internet.
 O aplicativo instalado consulta e baixa atualizações em segundo plano e aplica a atualização ao fechar.
@@ -15,6 +17,8 @@ Consulte [preparação de lançamento](docs/RELEASE.md),
 
 - cadastro por link, edição, busca e exclusão de empresas;
 - extração automática de código e nome pelo padrão `código - nome da empresa`;
+- cadastro de várias empresas por um único link de grupo do SharePoint;
+- descoberta de novas empresas ao abrir documentos do grupo, com opção de atualização manual;
 - código da empresa como identificador único;
 - senha no Windows Credential Manager, Keychain ou keyring compatível;
 - navegação em uma única janela com sessão persistente;
@@ -34,7 +38,10 @@ Consulte [preparação de lançamento](docs/RELEASE.md),
 O Microsoft WebView2 Runtime deve estar instalado para executar o aplicativo.
 O instalador do ACMAIS LINK configura o componente quando necessário.
 
-Se a aplicação não conseguir iniciar, ela exibirá uma mensagem e gravará o diagnóstico em `%TEMP%\ACMAIS_LINK_startup_error.log`.
+Erros capturados durante a inicialização são registrados em
+`%TEMP%\ACMAIS_LINK_startup_error.log`. A
+[matriz de testes](docs/TEST_MATRIX.md) descreve o diagnóstico de tela branca
+observado no Windows Sandbox.
 
 ## Testar
 

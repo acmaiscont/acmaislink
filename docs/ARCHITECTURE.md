@@ -17,7 +17,10 @@ O MVP usa Python 3.11 ou superior, pywebview e keyring. A combinação utiliza o
 - `updater.py`: consulta de Releases estáveis, download HTTPS limitado e digest SHA-256 obrigatório.
 - `auto_update.py`: consulta periódica em thread daemon, cache reconfirmado nesta sessão e instalação silenciosa somente após fechar a janela normalmente. A interface apenas consulta o estado; não pode iniciar instalações.
 - `runtime.py`: detecção de WebView2 no registro antes de criar a janela.
-- `installer/`: dois instaladores NSIS, com ou sem WebView2, usando diretórios por versão.
+- `installer/`: instalador único NSIS para instalação inicial e atualização. Verifica
+  o WebView2 no Registro para o computador e o usuário atual, nas visões de 32 e
+  64 bits. Se ausente, executa o bootstrapper oficial com `/silent /install` e
+  confirma a disponibilidade do runtime antes de instalar em um diretório por versão.
 
 ## Fluxo de acesso
 

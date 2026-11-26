@@ -1,5 +1,8 @@
 # Refinamento do instalador 1.0.0
 
+Este documento registra a distribuição da 1.0.0. O fluxo atual usa um único
+pacote, descrito no [guia de lançamento](RELEASE.md).
+
 Os pacotes continuam com a versão **1.0.0**. O pacote `update` atende tanto a uma
 instalação inicial em um computador com WebView2 quanto à reinstalação desta
 edição. O pacote `full` inclui o instalador offline do WebView2 e também pode

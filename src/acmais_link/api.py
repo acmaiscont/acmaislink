@@ -51,6 +51,7 @@ class AppApi:
         self._mode = "home"
         self._pending: dict[str, Any] | None = None
         self._current_company: Company | None = None
+        self._group_checks: dict[str, float] = {}
         self._notice: dict[str, Any] | None = None
         self._navigation_token = 0
         self._probe_scheduled = False
@@ -257,6 +258,18 @@ class AppApi:
             return {"ok": True}
         except Exception as exc:
             self._logger.warning("Falha ao abrir empresa: code=%s error=%s", code, type(exc).__name__)
+            return self._error(exc)
+
+    def refresh_group(self, code: str) -> dict:
+        try:
+            if not callable(getattr(self._window, "delivery_cookies", None)):
+                raise ValidationError("A atualização de grupos requer o WebView2.")
+            with self._lock:
+                request_token = self._navigation_token
+            self._queue_navigation({"kind": "refresh-group", "code": code, "attempts": 0},
+                                   expected_token=request_token, expected_mode="home")
+            return {"ok": True}
+        except Exception as exc:
             return self._error(exc)
 
     def open_external(self, code: str) -> dict:
@@ -479,6 +492,18 @@ class AppApi:
                 company = Company.from_payload({"code": code, "name": name, "url": pending["url"]})
                 if not self._persist_company(company, pending, token):
                     return
+            elif pending["kind"] == "refresh-group":
+                company = pending["company"]
+                if library_folder_path(current_url) is None:
+                    self._retry_navigation(token)
+                    return
+                self._navigation_phase(pending, "listing-group")
+                try:
+                    self._refresh_group_members(window, company, current_url, token, manual=True)
+                except (OSError, http.client.HTTPException) as exc:
+                    raise ValidationError("Não foi possível consultar o grupo no SharePoint. Tente novamente.") from exc
+                self._return_home(expected_token=token)
+                return
             else:
                 company = pending["company"]
                 if company.group_code and not self._enter_group_company(company, current_url, pending, token):
@@ -522,14 +547,14 @@ class AppApi:
             shown = self._show_company(window, company, active_token)
             if shown and pending["kind"] == "setup":
                 self._cleanup_previous_credential(company, pending)
+            if shown and pending["kind"] == "open" and company.group_code:
+                self._check_group_after_open(window, company, current_url, active_token)
         except Exception as exc:
             if self._is_current(token, "navigating"):
                 self._logger.exception("Falha ao concluir navegação")
                 self._fail_navigation(self._error(exc)["error"], token)
 
-    def _import_group(self, window, current_url, folder, group_code, pending, token):
-        self._navigation_phase(pending, "listing-group")
-        current = lambda: self._is_current(token, "navigating")
+    def _list_group_members(self, window, current_url, folder, group_code, share_url, current):
         with SharePointDelivery(current_url, folder,
                                 lambda url: window.delivery_cookies(url, current), current) as transport:
             names = transport.list_subfolders()
@@ -547,9 +572,67 @@ class AppApi:
                 raise ValidationError(f"O grupo tem duas pastas com o código {code}. Confira os nomes no SharePoint.")
             codes.add(code)
             members.append(Company.from_payload({
-                "code": code, "name": company_name, "url": pending["url"], "group_code": group_code,
+                "code": code, "name": company_name, "url": share_url, "group_code": group_code,
                 "folder_url": library_folder_url(current_url, folder + "/" + name),
             }))
+        return members, skipped
+
+    def _check_group_after_open(self, window, company, current_url, token):
+        if not callable(getattr(window, "delivery_cookies", None)):
+            return
+        with self._lock:
+            now = time.monotonic()
+            last_check = self._group_checks.get(company.group_code)
+            if not self._is_current(token, "active") or (last_check is not None and now - last_check < 300):
+                return
+            self._group_checks[company.group_code] = now
+        threading.Thread(target=self._check_group_in_background, args=(window, company, current_url, token),
+                         daemon=True).start()
+
+    def _check_group_in_background(self, window, company, current_url, token):
+        try:
+            if self._refresh_group_members(window, company, current_url, token, manual=False):
+                self._update_company_choices(window, company, token)
+        except Exception as exc:
+            if self._is_current(token, "active"):
+                self._logger.warning("Não foi possível consultar o grupo em segundo plano: %s", type(exc).__name__)
+
+    def _refresh_group_members(self, window, company, current_url, token, *, manual):
+        mode = "navigating" if manual else "active"
+        current = lambda: self._is_current(token, mode)
+        if not current():
+            return 0
+        saved_folder = library_folder_path(company.folder_url)
+        opened = library_folder_path(current_url)
+        saved, remote = urlparse(company.folder_url), urlparse(current_url)
+        if not saved_folder or not opened or saved.hostname != remote.hostname or saved.path.casefold() != remote.path.casefold():
+            raise ValidationError("O acesso aberto não corresponde à pasta cadastrada do grupo.")
+        parent = saved_folder.rsplit("/", 1)[0]
+        opened_key, saved_key = opened.casefold(), saved_folder.casefold()
+        inside_member = opened_key == saved_key or opened_key.startswith(saved_key + "/")
+        matches = opened_key == parent.casefold() if manual else inside_member
+        if not matches or group_identity(parent) != company.group_code:
+            raise ValidationError("O acesso aberto não corresponde à pasta cadastrada do grupo.")
+
+        members, _ = self._list_group_members(window, current_url, parent, company.group_code, company.url, current)
+        with self._persistence_lock, self._lock:
+            if not current():
+                return 0
+            added = self._config.add_group_members(company, members)
+            self._group_checks[company.group_code] = time.monotonic()
+            if manual or (added and self._notice is None):
+                detail = "nenhuma empresa nova para adicionar."
+                if added == 1:
+                    detail = "1 nova empresa adicionada."
+                elif added > 1:
+                    detail = f"{added} novas empresas adicionadas."
+                self._notice = {"message": f"Grupo {company.group_code}: {detail}", "error": False}
+        return added
+
+    def _import_group(self, window, current_url, folder, group_code, pending, token):
+        self._navigation_phase(pending, "listing-group")
+        current = lambda: self._is_current(token, "navigating")
+        members, skipped = self._list_group_members(window, current_url, folder, group_code, pending["url"], current)
         if not members:
             raise ValidationError("O grupo não tem subpastas no padrão código - nome da empresa.")
         with self._persistence_lock:
@@ -813,7 +896,9 @@ class AppApi:
         if not self._is_current(token, "preparing"):
             return
         try:
-            self._window.set_title(f"{APP_DISPLAY_TITLE} - Abrindo documentos...")
+            refreshing_group = pending["kind"] == "refresh-group"
+            title = "Atualizando grupo..." if refreshing_group else "Abrindo documentos..."
+            self._window.set_title(f"{APP_DISPLAY_TITLE} - {title}")
             if not self._is_current(token, "preparing"):
                 return
             self._window.show()
@@ -824,6 +909,8 @@ class AppApi:
                 guard = lambda: self._is_current(token, 'preparing')
                 if "files" in pending:
                     shown = show_loading(guard, delivery=True)
+                elif refreshing_group:
+                    shown = show_loading(guard, group=True)
                 else:
                     shown = show_loading(guard)
             else:
@@ -855,12 +942,14 @@ class AppApi:
     def _prepare_navigation(self, pending: dict, token: int) -> bool:
         # Credential Manager/disk may be slow. They run only after the cover
         # acknowledges its paint, without holding the cancellation/state lock.
-        if pending['kind'] == 'open':
+        if pending['kind'] in ('open', 'refresh-group'):
             company = pending.get('company') or self._config.get(pending['code'])
             if not self._is_current(token, 'preparing'):
                 return False
             if company is None:
                 raise ValidationError('Empresa não encontrada.')
+            if pending['kind'] == 'refresh-group' and not company.group_code:
+                raise ValidationError('Essa empresa não pertence a um grupo.')
             pending['company'] = company
             pending.setdefault('url', company.url)
             pending['password'] = self._credentials.get(company.credential_key) or ''
@@ -949,16 +1038,19 @@ class AppApi:
             if self._is_current(token, "active"):
                 self._logger.exception("Falha ao restaurar os controles de navegação")
 
+    def _update_company_choices(self, window, company, token):
+        set_choices = getattr(window, 'set_company_choices', None)
+        if callable(set_choices):
+            choices = [{'code': item.code, 'name': item.name} for item in self._config.list()]
+            set_choices(choices, company.code, lambda: self._is_current(token, 'active'))
+
     def _show_company(self, window: Any, company: Company, token: int) -> bool:
         if not self._is_current(token, "active"):
             return False
         try:
             show_folder = getattr(window, 'show_folder', None)
             if callable(show_folder):
-                set_choices = getattr(window, 'set_company_choices', None)
-                if callable(set_choices):
-                    choices = [{'code': item.code, 'name': item.name} for item in self._config.list()]
-                    set_choices(choices, company.code, lambda: self._is_current(token, 'active'))
+                self._update_company_choices(window, company, token)
                 shown = show_folder(f'{company.code} - {company.name}', lambda: self._is_current(token, 'active'))
             else:
                 shown = window.evaluate_js(navigation_toolbar_script(

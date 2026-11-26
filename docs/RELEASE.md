@@ -2,7 +2,8 @@
 
 O repositório de distribuição é https://github.com/acmaiscont/acmaislink.
 O aplicativo consulta apenas Releases públicas estáveis.
-A atualização pública de 1.1.1 é diretamente para 1.1.2. Os instaladores de
+A versão pública atual é a [1.1.3](https://github.com/acmaiscont/acmaislink/releases/tag/v1.1.3).
+A atualização pública da 1.1.2 é diretamente para a 1.1.3. Os instaladores de
 homologação com perfil separado não fazem parte da distribuição.
 
 ## Pacotes
@@ -77,12 +78,12 @@ Se o OneDrive produzir cópias de conflito, reconcilie-as antes de compilar.
 
 ## Após aprovação do proprietário
 
-A página estática de downloads fica em `site-downloads/dist/`, pronta para
-integração no site atual; sua criação não altera hospedagem nem DNS.
+As instruções para atualizar o botão do site estão em
+[`site-downloads/README.md`](../site-downloads/README.md).
 
 1. Revisar código e documentos; enviar apenas arquivos versionados para `main`.
 2. Validar o mesmo instalador em VMs Windows com e sem WebView2.
-3. Testar atualização real de 1.1.0 para uma versão posterior em ambiente de teste:
+3. Testar atualização da versão pública anterior para a candidata em ambiente de teste:
    download sem prompts, uso de documentos preservado, aplicação silenciosa ao
    fechar e próxima abertura na nova versão. Não publicar uma Release de teste
    como estável no repositório de produção: todos os clientes instalados consultarão esse canal.
@@ -98,9 +99,10 @@ integração no site atual; sua criação não altera hospedagem nem DNS.
 
 ## Limites da validação local
 
-A máquina de desenvolvimento já possui WebView2. Não remover o runtime compartilhado
-para simular ausência. Os testes locais simulam esse fluxo. A instalação pelo
-bootstrapper real exige uma VM Windows sem o runtime e com acesso à internet.
+Use uma máquina de teste ou VM sem o runtime e com acesso à internet para
+validar a instalação real pelo bootstrapper. Confira também se a tela inicial
+é renderizada. Os resultados do Windows Sandbox e do Windows fora do Sandbox
+estão na [matriz de testes](TEST_MATRIX.md).
 
 Referências: [modo silencioso NSIS](https://nsis.sourceforge.io/Docs/Chapter3.html)
 e [ciclo de execução pywebview](https://pywebview.flowrl.com/guide/usage).

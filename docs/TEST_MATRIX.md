@@ -112,3 +112,29 @@ real do cliente nem o teste de atualização entre duas Releases.
   removida. Selecionar a empresa já aberta não reiniciou a navegação; retorno à
   lista manteve o cadastro. Pacotes completos e de atualização gerados em
   `artifacts/validacao-2026-10-13-fluxo/`, com SHA-256 conferido.
+
+### Validação da versão pública 1.1.2 — novembro de 2026
+
+- O instalador unificado foi testado com o WebView2 presente e com a ausência do
+  componente simulada. A simulação cobriu tanto o sucesso quanto a falha do bootstrapper.
+- No Windows Sandbox, a atualização silenciosa da 1.1.1 para a 1.1.2 preservou
+  o cadastro de teste, a credencial e o atalho. A tela branca ocorreu nas duas
+  versões nesse ambiente. O SDK WebView2 retornou `0x80070002` na inicialização
+  padrão e conseguiu inicializar ao receber explicitamente o caminho do runtime.
+- Em Windows fora do Sandbox, foi confirmada a abertura do Piloto 1.2.1. Em uma
+  simulação isolada de runtime indisponível, a tela ficou branca e voltou a
+  renderizar após a reinstalação. Em teste separado, o proprietário confirmou a
+  abertura da versão de produção em um Windows sem WebView2 prévio.
+- O Microsoft Defender colocou um instalador do Piloto 1.2.1 em quarentena com
+  a detecção `Trojan:Win32/Bearfoos.A!ml`. No teste informado pelo proprietário,
+  o Defender não emitiu esse alerta para o instalador de produção 1.1.2.
+- O link público direto e o SHA-256 do instalador 1.1.2 foram conferidos, assim
+  como a oferta da versão ao atualizador da 1.1.1.
+
+### Homologação da versão 1.1.3
+
+- Atualização de grupo validada pelo proprietário em um grupo do SharePoint
+  com o Piloto. Os testes automatizados cobriram a reutilização da credencial,
+  a preservação de cadastros existentes, a exclusão manual e o cancelamento.
+- O alinhamento dos cartões foi conferido no Edge a 320, 360, 643 e 960 px
+  e aprovado pelo proprietário no Piloto 1.2.3.

@@ -434,7 +434,7 @@ class NavigationWindow:
                 self._cancel.AccessibleName = "Cancelar envio"
         self._on_ui(update)
 
-    def show_loading(self, is_current, *, delivery=False):
+    def show_loading(self, is_current, *, delivery=False, group=False):
         def show():
             if not is_current():
                 return False
@@ -447,10 +447,13 @@ class NavigationWindow:
                     self._cancel.Text = self._cancel.AccessibleName = "Cancelar envio"
                     self._delivery_bar.Style = ProgressBarStyle.Marquee
                 else:
-                    self._loading_title.Text = "Abrindo documentos…"
-                    self._loading_detail.Text = "Conectando ao SharePoint e validando a pasta.\nVocê pode cancelar a qualquer momento."
+                    self._loading_title.Text = "Atualizando grupo…" if group else "Abrindo documentos…"
+                    self._loading_detail.Text = (
+                        "Conferindo se há novas empresas no SharePoint." if group
+                        else "Conectando ao SharePoint e validando a pasta.\nVocê pode cancelar a qualquer momento."
+                    )
                     self._cancel.Text = "Cancelar e voltar às empresas"
-                    self._cancel.AccessibleName = "Cancelar abertura e voltar às empresas"
+                    self._cancel.AccessibleName = self._cancel.Text
                 self._delivery_bar.Visible = delivery
             self._toolbar.Visible = False
             self._cover.Visible = True

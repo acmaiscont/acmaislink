@@ -1,5 +1,11 @@
 # Alterações
 
+## 1.1.3
+
+- Grupos cadastrados passam a buscar novas empresas no SharePoint em segundo plano ao abrir documentos de uma empresa do grupo.
+- O botão **Atualizar grupo** permite consultar na hora, com o link e a senha já salvos, e informa quantas empresas foram adicionadas.
+- Cartões de empresas individuais e de grupo mantêm os botões alinhados em telas estreitas.
+
 ## 1.1.2
 
 - Um único instalador para a primeira instalação e as atualizações.

@@ -12,7 +12,7 @@ class SecureBridge:
         if not isinstance(token, str) or not hmac.compare_digest(token, self._token):
             return {"ok": False, "error": "Comando não autorizado."}
         allowed = {
-            "list_companies", "consume_notice", "begin_company_setup", "delete_company",
+            "list_companies", "consume_notice", "begin_company_setup", "delete_company", "refresh_group",
             "open_company", "open_external", "get_update_status",
             "delivery_options", "choose_delivery_files", "choose_delivery_folder",
             "begin_delivery", "recent_deliveries", "open_delivery_folder",

@@ -43,10 +43,16 @@ class ConfigStore:
     def delete(self, code: str) -> bool:
         with self._lock:
             companies = self.list()
-            kept = [item for item in companies if item.code.casefold() != code.strip().casefold()]
-            if len(kept) == len(companies):
+            normalized = code.strip().casefold()
+            company = next((item for item in companies if item.code.casefold() == normalized), None)
+            if company is None:
                 return False
-            self._write(kept)
+            hidden = self._read().get("hidden_group_members", {})
+            if company.group_code:
+                codes = hidden.setdefault(company.group_code, [])
+                if company.code not in codes:
+                    codes.append(company.code)
+            self._write([item for item in companies if item.code.casefold() != normalized], hidden)
             return True
 
     def replace_group(self, group_code: str, members: list[Company]) -> tuple[int, int]:
@@ -57,8 +63,23 @@ class ConfigStore:
             admitted = [item for item in members if item.code.casefold() not in existing_codes]
             if not admitted:
                 raise ValueError("As empresas deste grupo já estão cadastradas por outro acesso.")
-            self._write(kept + admitted)
+            hidden = self._read().get("hidden_group_members", {})
+            hidden.pop(group_code, None)
+            self._write(kept + admitted, hidden)
             return len(admitted), len(members) - len(admitted)
+
+    def add_group_members(self, source: Company, members: list[Company]) -> int:
+        with self._lock:
+            companies = self.list()
+            if source not in companies:
+                raise ValueError("O acesso do grupo mudou. Abra a lista de empresas e tente novamente.")
+            hidden = self._read().get("hidden_group_members", {})
+            excluded = {item.code.casefold() for item in companies}
+            excluded.update(code.casefold() for code in hidden.get(source.group_code, []))
+            additions = [item for item in members if item.code.casefold() not in excluded]
+            if additions:
+                self._write(companies + additions, hidden)
+            return len(additions)
 
     def _read(self) -> dict:
         if not self.path.exists():
@@ -69,9 +90,13 @@ class ConfigStore:
             raise ValueError("O arquivo de configuração possui um formato incompatível.")
         return data
 
-    def _write(self, companies: list[Company]) -> None:
+    def _write(self, companies: list[Company], hidden_group_members: dict | None = None) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = {"version": 1, "companies": [item.to_dict() for item in companies]}
+        if hidden_group_members is None:
+            hidden_group_members = self._read().get("hidden_group_members", {})
+        if hidden_group_members:
+            payload["hidden_group_members"] = hidden_group_members
         fd, temporary_name = tempfile.mkstemp(prefix="companies-", suffix=".tmp", dir=self.path.parent)
         try:
             with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as stream:

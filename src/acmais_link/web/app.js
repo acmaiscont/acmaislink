@@ -139,6 +139,7 @@ function render() {
       </div>
       <div class="secondary-actions">
         <button class="text-button" data-action="external" data-code="${escapeHtml(company.code)}">Abrir no navegador</button>
+        ${company.group_code ? `<button class="text-button" data-action="refresh-group" data-code="${escapeHtml(company.code)}">Atualizar grupo</button>` : ""}
         <button class="text-button" data-action="delete" data-code="${escapeHtml(company.code)}">Remover</button>
       </div>
     </article>
@@ -227,17 +228,19 @@ grid.addEventListener("click", async (event) => {
   if (button.dataset.action === "delete") return removeCompany(company);
   button.disabled = true;
   const external = button.dataset.action === "external";
+  const refreshGroup = button.dataset.action === "refresh-group";
+  const label = button.textContent;
   const operation = external ? null : ++state.navigationSeq;
   if (!external) {
-    button.textContent = "Abrindo…";
-    setBusy(true);
+    button.textContent = refreshGroup ? "Consultando…" : "Abrindo…";
+    if (refreshGroup) setBusy(true, "Atualizando grupo", "Conferindo se há novas empresas no SharePoint…");
+    else setBusy(true);
     await nextPaint();
   }
   try {
     if (!external && operation !== state.navigationSeq) return;
-    const result = external
-      ? await api().open_external(company.code)
-      : await api().open_company(company.code);
+    const command = external ? "open_external" : refreshGroup ? "refresh_group" : "open_company";
+    const result = await api()[command](company.code);
     if (!external && operation !== state.navigationSeq) return;
     if (!result.ok) {
       if (!external) setBusy(false);
@@ -249,7 +252,7 @@ grid.addEventListener("click", async (event) => {
     notify("Não foi possível concluir a ação. Tente novamente.", true);
   } finally {
     button.disabled = false;
-    if (!external) button.textContent = "Abrir documentos";
+    button.textContent = label;
   }
 });
 

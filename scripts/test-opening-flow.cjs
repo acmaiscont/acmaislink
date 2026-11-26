@@ -86,7 +86,7 @@ async function main() {
       window.pywebview = { api: {
         command(token, name, args) {
           if (token !== 'fixture-local-capability') return Promise.reject(new Error('Wrong local capability'));
-          if (name === 'list_companies') return Promise.resolve({ ok: true, companies: [{ code: '0000', name: 'Empresa fictícia', url: 'https://tenant.sharepoint.com/sites/fixture', hasCredential: true }] });
+          if (name === 'list_companies') return Promise.resolve({ ok: true, companies: window.__qa.companies || [{ code: '0000', name: 'Empresa fictícia', url: 'https://tenant.sharepoint.com/sites/fixture', hasCredential: true }] });
           if (name === 'consume_notice') {
             const notice = window.__qa.notice;
             window.__qa.notice = null;
@@ -166,6 +166,69 @@ async function main() {
   }
 
   try {
+    await test('group and individual cards keep the same action alignment at narrow widths', async page => {
+      await page.evaluate(() => {
+        const fixture = { name: 'Empresa fictícia', url: 'https://tenant.sharepoint.com/sites/fixture', hasCredential: true };
+        window.__qa.companies = [{ ...fixture, code: '0000' },
+          { ...fixture, code: '00000', group_code: '90002' }];
+      });
+      await page.locator('#refresh').click();
+      await page.getByRole('button', { name: 'Atualizar grupo' }).waitFor();
+
+      for (const width of [643, 960, 360, 320]) {
+        await page.setViewportSize({ width, height: 680 });
+        const cards = await page.locator('.company-card').evaluateAll(items => items.map(card => {
+          const frame = card.getBoundingClientRect();
+          const actions = {};
+          for (const button of card.querySelectorAll('button')) {
+            const rect = button.getBoundingClientRect();
+            actions[button.dataset.action] = {
+              x: rect.x - frame.x, y: rect.y - frame.y, width: rect.width, height: rect.height,
+              fits: rect.right <= frame.right && button.scrollWidth <= button.clientWidth,
+            };
+          }
+          return { y: frame.y, actions };
+        }));
+        const [individual, group] = cards;
+        if (width >= 643) assert.equal(individual.y, group.y, `Cards should share a row at ${width}px`);
+        assert.equal(Object.hasOwn(individual.actions, 'refresh-group'), false);
+        for (const action of ['deliver', 'open', 'edit', 'external', 'delete']) {
+          const first = individual.actions[action];
+          const second = group.actions[action];
+          assert.ok(first.fits && second.fits, `${action} should fit at ${width}px`);
+          for (const dimension of ['x', 'y', 'width', 'height']) {
+            assert.ok(Math.abs(first[dimension] - second[dimension]) <= 1,
+              `${action} ${dimension} should align at ${width}px`);
+          }
+        }
+        assert.equal(group.actions['refresh-group'].y, group.actions.delete.y);
+        assert.ok(Object.values(group.actions).every(action => action.fits));
+      }
+    });
+
+    await test('group refresh appears on group cards and paints before checking SharePoint', async page => {
+      const refreshGroup = page.getByRole('button', { name: 'Atualizar grupo' });
+      assert.equal(await refreshGroup.count(), 0);
+      await page.evaluate(() => {
+        window.__qa.companies = [{ code: '0000', name: 'Empresa fictícia',
+          url: 'https://tenant.sharepoint.com/sites/fixture', group_code: '90002', hasCredential: true }];
+        window.__qa.response = 'error';
+        window.__qa.holdFrames = true;
+      });
+      await page.locator('#refresh').click();
+      await page.setViewportSize({ width: 360, height: 480 });
+      await refreshGroup.click();
+      assert.equal(await page.locator('#busy-title').textContent(), 'Atualizando grupo');
+      assert.deepEqual(await page.evaluate(() => window.__qa.calls), []);
+      await paint(page);
+      await paint(page);
+      const calls = await page.evaluate(() => window.__qa.calls);
+      assert.equal(calls.length, 1);
+      assert.equal(calls[0].name, 'refresh_group');
+      assert.deepEqual(calls[0].args, ['0000']);
+      await assertUnlocked(page);
+    });
+
     await test('guided delivery suggests sector and period, and waits for a confirmed type and paint', async page => {
       await page.locator('[data-action="deliver"]').click();
       await page.locator('#choose-delivery-files').click();
