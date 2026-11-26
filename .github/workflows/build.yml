@@ -2,6 +2,9 @@ name: Validar e gerar candidato
 on:
   workflow_dispatch:
   pull_request:
+  push:
+    branches:
+      - portabilidade/macos-linux
 permissions:
   contents: read
 jobs:
@@ -33,5 +36,86 @@ jobs:
         with:
           name: candidato-acmais-link-x64
           path: artifacts/*
+          retention-days: 14
+
+  portable:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            package: linux-ubuntu-24.04-x64
+          - runner: macos-15
+            package: macos-15-arm64
+          - runner: macos-15-intel
+            package: macos-15-x64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        if: runner.os == 'macOS'
+        with:
+          python-version: '3.12'
+      - name: Preparar GTK, WebKit e Secret Service
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-venv python3-gi python3-gi-cairo gir1.2-gtk-3.0 gir1.2-webkit2-4.1 xvfb xauth gnome-keyring dbus-x11
+          /usr/bin/python3 -m venv --system-site-packages .venv
+      - name: Preparar Python no macOS
+        if: runner.os == 'macOS'
+        run: python -m venv .venv
+      - name: Preparar código e executar testes
+        run: |
+          .venv/bin/python -m pip install -r requirements-portable-build.txt
+          .venv/bin/python -m pip install -e .
+          .venv/bin/python -m unittest discover -s tests -q
+      - name: Testar Secret Service no Linux
+        if: runner.os == 'Linux'
+        run: |
+          dbus-run-session -- sh -euc '
+            printf %s acmais-ci | gnome-keyring-daemon --unlock
+            .venv/bin/python scripts/test_portable_keyring.py
+          '
+      - name: Testar Keychain no macOS
+        if: runner.os == 'macOS'
+        run: |
+          keychain="$RUNNER_TEMP/acmais-ci.keychain-db"
+          security create-keychain -p acmais-ci "$keychain"
+          trap 'security delete-keychain "$keychain"' EXIT
+          security default-keychain -s "$keychain"
+          security unlock-keychain -p acmais-ci "$keychain"
+          .venv/bin/python scripts/test_portable_keyring.py
+      - name: Testar WebKitGTK
+        if: runner.os == 'Linux'
+        run: xvfb-run -a .venv/bin/python scripts/test_portable_native.py
+      - name: Testar WKWebView
+        if: runner.os == 'macOS'
+        run: .venv/bin/python scripts/test_portable_native.py
+      - name: Gerar pacote
+        run: .venv/bin/python -m PyInstaller --noconfirm ACMAIS_LINK_PORTABLE.spec
+      - name: Validar pacote Linux e arquivar
+        if: runner.os == 'Linux'
+        env:
+          PACKAGE: ${{ matrix.package }}
+        run: |
+          xvfb-run -a .venv/bin/python scripts/test_portable_startup.py "$PWD/dist/ACMAIS LINK/ACMAIS LINK"
+          mkdir -p artifacts
+          tar -C dist -czf "artifacts/ACMAIS-LINK-candidato-$PACKAGE.tar.gz" "ACMAIS LINK"
+      - name: Validar pacote macOS e arquivar
+        if: runner.os == 'macOS'
+        env:
+          PACKAGE: ${{ matrix.package }}
+        run: |
+          codesign --verify --deep --strict "dist/ACMAIS LINK.app"
+          .venv/bin/python scripts/test_portable_startup.py "$PWD/dist/ACMAIS LINK.app/Contents/MacOS/ACMAIS LINK"
+          mkdir -p artifacts
+          ditto -c -k --keepParent "dist/ACMAIS LINK.app" "artifacts/ACMAIS-LINK-candidato-$PACKAGE.zip"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: candidato-acmais-link-${{ matrix.package }}
+          path: artifacts/*
+          if-no-files-found: error
           retention-days: 14
 # Deliberately no tag/release/push permissions: publication follows owner approval.

@@ -30,7 +30,7 @@ falte, o bootstrapper da Microsoft usa a internet para instalar o componente
 silenciosamente. O mesmo pacote serve para primeira instalação e atualização,
 instala o aplicativo por usuário e cria atalhos.
 
-## Atualização
+## Atualização no Windows
 
 O aplicativo instalado procura e baixa versões estáveis superiores em segundo
 plano, sem perguntas. A atualização pronta é aplicada silenciosamente quando o
@@ -44,6 +44,40 @@ instalação do usuário.
 O perfil em `%APPDATA%\ACMAIS\ACMAIS LINK`
 contém links compartilhados e sessão local; proteja esse diretório. As senhas
 permanecem no cofre do Windows.
+
+## Candidatos para macOS e Linux
+
+Os pacotes de homologação ficam nos artefatos da execução do GitHub Actions.
+A árvore de versões públicas continua distribuindo o instalador Windows.
+
+- **macOS 15**. Use o ZIP correspondente ao processador (Apple Silicon ou
+  Intel). O ZIP contém o aplicativo `ACMAIS LINK.app`, que usa o WKWebView e
+  o Keychain do sistema. Candidatos de CI usam assinatura local de compilação.
+  Para distribuição direta, assine com Developer ID, envie à notarização da
+  Apple e valide o pacote baixado em um perfil limpo com o Gatekeeper ativo.
+- **Ubuntu 24.04 x64**. Extraia o TAR.GZ e execute `ACMAIS LINK` dentro da
+  pasta extraída. Mantenha a pasta `_internal` ao lado do executável. A sessão
+  gráfica deve ter GTK 3, WebKitGTK 4.1 e um cofre Secret Service desbloqueado.
+  No Ubuntu, instale as dependências com
+  `sudo apt install gir1.2-gtk-3.0 gir1.2-webkit2-4.1 gnome-keyring`.
+
+Para rodar pelo código-fonte no Ubuntu, instale também `python3-venv`,
+`python3-gi` e `python3-gi-cairo` e use
+`/usr/bin/python3 -m venv --system-site-packages .venv`. No macOS, use
+`python3 -m venv .venv` com Python 3.12. Em ambos os sistemas:
+
+```sh
+.venv/bin/python -m pip install -r requirements-portable-build.txt
+.venv/bin/python -m pip install -e .
+.venv/bin/python launcher.py
+```
+
+O perfil fica em `~/Library/Application Support/ACMAIS/ACMAIS LINK` no macOS,
+e em `${XDG_CONFIG_HOME:-~/.config}/acmais-link` no Linux. A primeira
+portabilidade mantém uma instância por perfil e preserva a janela em execução
+quando há uma segunda tentativa de abertura. As atualizações destes pacotes são
+manuais. Substituir a pasta do aplicativo preserva os cadastros e o histórico do
+mesmo usuário. As senhas permanecem no cofre do sistema.
 
 ## Empresas de um grupo
 

@@ -11,6 +11,7 @@ O MVP usa Python 3.11 ou superior, pywebview e keyring. A combinação utiliza o
 - `credential_store.py`: acessa Windows Credential Manager, Keychain ou keyring equivalente.
 - `api.py`: coordena a janela única, a máquina de estados de navegação e o fallback para navegador. Objetos nativos e dependências permanecem privados para não serem serializados pela ponte JavaScript.
 - `navigation_window.py`: no Windows, executa leituras de DOM diretamente pelo WebView2, com limite de três segundos por tentativa. A cobertura e a barra de navegação são controles da própria janela, independentes da ponte JavaScript e do carregamento do SharePoint.
+- `portable_navigation.py`: integra WKWebView no macOS e WebKitGTK no Linux. As operações na janela têm timeout e uma guarda que descarta ações de navegações canceladas. A leitura nativa entrega ao transporte apenas cookies que se aplicam à URL HTTPS de destino no tenant ativo. Os seletores de arquivos/pastas e os controles de progresso são nativos.
 - `sharepoint.py`: gera a automação restrita à página de senha do link compartilhado.
 - `web/`: interface local de seleção e manutenção de empresas.
 - `bridge.py`: capacidade aleatória para comandos privilegiados, entregue somente ao documento local inicial.
@@ -38,6 +39,8 @@ domínio, a URL exata do documento e a operação atual; não é repetido por um
 resposta antiga. Reautenticar uma página já aberta não recarrega o link.
 
 Uma trava nomeada do Windows garante instância única. Uma segunda execução restaura e ativa a janela já existente, sem criar outra WebView.
+
+No macOS e no Linux, um bloqueio POSIX protege o perfil de cadastros, sessão e histórico contra duas instâncias simultâneas. A primeira instância continua em execução.
 Durante a troca silenciosa de arquivos, a nova execução aguarda a trava por tempo
 limitado. O controlador automático é habilitado apenas na instalação padrão,
 nunca em cópias avulsas de desenvolvimento.

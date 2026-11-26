@@ -43,6 +43,13 @@ Erros capturados durante a inicialização são registrados em
 [matriz de testes](docs/TEST_MATRIX.md) descreve o diagnóstico de tela branca
 observado no Windows Sandbox.
 
+## Candidatos para macOS e Linux
+
+A portabilidade parte da 1.1.3. O GitHub Actions gera candidatos para macOS 15
+(Apple Silicon e Intel) e Ubuntu 24.04 (x64). A [instalação de homologação](docs/INSTALLATION.md#candidatos-para-macos-e-linux)
+lista as dependências e a [matriz de testes](docs/TEST_MATRIX.md#portabilidade)
+define o que precisa passar antes de disponibilizar downloads aos clientes.
+
 ## Testar
 
 ```powershell

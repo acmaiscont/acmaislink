@@ -1,5 +1,31 @@
 # Matriz de testes do ACMAIS LINK
 
+## Portabilidade
+
+O workflow **Validar e gerar candidato** roda a suíte na plataforma e abre uma
+janela nativa em macOS 15 (Intel e Apple Silicon) e Ubuntu 24.04 (x64, sob
+Xvfb). Ele verifica navegação e retorno em uma janela, leitura de DOM durante o
+progresso, gravação e leitura pelo cofre local e abertura da interface no pacote
+empacotado. Os arquivos de teste usam somente conteúdo local e senhas geradas.
+Os pacotes ficam nos artefatos do workflow por 14 dias.
+
+Antes de liberar downloads, instale os pacotes em usuários limpos em um Mac de
+teste alugado/em nuvem e em uma estação ou VM Ubuntu Desktop. Use um link
+SharePoint exclusivo de homologação, com permissão de gravação e uma empresa de
+teste. Confirme no mínimo:
+
+| Cenário | Resultado esperado |
+|---|---|
+| Primeiro início | Interface e CSS carregam, sem tela branca ou alerta inesperado |
+| Cadastro com senha | O app abre a pasta, salva o acesso no cofre e reabre após reiniciar |
+| Grupo | O link compartilhado importa as empresas corretas |
+| Selecionar arquivos e pasta | Os seletores nativos retornam os itens esperados, inclusive subpastas |
+| Envio guiado | A pasta padrão é criada, o progresso é visível, duplicatas mostram o motivo e o histórico persiste |
+| Cancelar e abrir de novo | Nenhuma segunda janela aparece e a empresa anterior permanece íntegra |
+| Distribuição no macOS | O pacote baixado passa pelo Gatekeeper com assinatura Developer ID e notarização |
+
+## Fluxos do aplicativo
+
 | Área | Cenário | Resultado esperado |
 |---|---|---|
 | Cadastro | Duas empresas com o mesmo nome e códigos diferentes | Ambas aparecem com código e nome |

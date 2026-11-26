@@ -6,6 +6,7 @@ import sys
 import threading
 import time
 from ctypes import wintypes
+from pathlib import Path
 
 
 MUTEX_NAME = "Local\\ACMAIS_LINK_SingleInstance"
@@ -19,14 +20,30 @@ WINDOW_TITLE_PREFIX = "ACMAIS LINK"
 class SingleInstance:
     """Hand off startup between processes without running two app windows."""
 
-    def __init__(self) -> None:
+    def __init__(self, data_dir: Path | None = None) -> None:
         self._handle: int | None = None
+        self._data_dir = data_dir
+        self._lock_file = None
         self._events = ()
         self._listener = None
         self._stopping = threading.Event()
 
     def acquire(self) -> bool:
         if sys.platform != "win32":
+            import fcntl
+
+            if self._data_dir is None:
+                raise ValueError("Informe a pasta de dados para controlar a instância.")
+            file = (self._data_dir / "instance.lock").open("ab")
+            try:
+                fcntl.flock(file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                file.close()
+                return False
+            except OSError:
+                file.close()
+                raise
+            self._lock_file = file
             return True
         relaunch = self._create_mutex(RELAUNCH_MUTEX_NAME)
         if not relaunch:
@@ -156,6 +173,9 @@ class SingleInstance:
 
     def close(self) -> None:
         if sys.platform != "win32":
+            if self._lock_file is not None:
+                self._lock_file.close()
+                self._lock_file = None
             return
         self._stopping.set()
         if self._listener is not None:

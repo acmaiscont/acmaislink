@@ -22,6 +22,17 @@ from .runtime import webview_available
 from .web_home import home_filename, is_home_document, prepare_home
 from .window_geometry import initial_window_geometry
 from .navigation_window import NavigationWindow
+from .portable_navigation import PortableNavigationWindow
+
+
+def webview_backend():
+    if sys.platform == "win32":
+        return "edgechromium"
+    if sys.platform == "darwin":
+        return "cocoa"
+    if sys.platform.startswith("linux"):
+        return "gtk"
+    raise RuntimeError("Sistema operacional sem suporte para o ACMAIS LINK.")
 
 def resource_path(relative: str) -> Path:
     bundle = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
@@ -49,7 +60,9 @@ def _automatic_updates_enabled() -> bool:
 
 
 def main() -> None:
-    instance = SingleInstance()
+    backend = webview_backend()
+    data_dir = ensure_data_dirs()
+    instance = SingleInstance(data_dir)
     if not instance.acquire():
         return
     if not webview_available():
@@ -59,7 +72,6 @@ def main() -> None:
             "ACMAIS LINK", 0x10)
         instance.close()
         return
-    data_dir = ensure_data_dirs()
     logger = configure_logging(data_dir / "logs")
     development_web = None
     if getattr(sys, "frozen", False):
@@ -87,16 +99,34 @@ def main() -> None:
         background_color="#F7F8FA",
         text_select=False,
     )
-    adapter = NavigationWindow(window, api.return_home, api.open_current_external, api.open_company)
-    api._bind_window(adapter if sys.platform == 'win32' else window)
+    actions = (api.return_home, api.open_current_external, api.open_company)
+    adapter = (NavigationWindow(window, *actions) if backend == "edgechromium"
+               else PortableNavigationWindow(window, backend, *actions))
+    api._bind_window(adapter)
     window.events.loaded += api._on_loaded
+
     def initialize_local_ui(window):
-        current = window.get_current_url() or ""
-        if is_home_document(current, home_url):
-            window.evaluate_js(
-                f"if (location.href === {json.dumps(home_url)}) "
-                f"window.bootstrapAcmais?.({json.dumps(bridge._token)})"
-            )
+        if backend == "edgechromium":
+            current = window.get_current_url() or ""
+            if is_home_document(current, home_url):
+                window.evaluate_js(
+                    f"if (location.href === {json.dumps(home_url)}) "
+                    f"window.bootstrapAcmais?.({json.dumps(bridge._token)})"
+                )
+            return
+        try:
+            current = adapter.get_current_url() or ""
+            if is_home_document(current, home_url):
+                initialized = adapter.evaluate_navigation_js(
+                    f"location.href === {json.dumps(home_url)} && "
+                    f"typeof window.bootstrapAcmais === 'function' && "
+                    f"(window.bootstrapAcmais({json.dumps(bridge._token)}), true)",
+                    lambda: True,
+                )
+                if initialized:
+                    logger.info("Interface local carregada.")
+        except (TimeoutError, RuntimeError):
+            logger.exception("A interface local não respondeu à inicialização.")
     window.events.loaded += initialize_local_ui
     if sys.platform == "win32":
         def listen_for_restart():
@@ -108,15 +138,16 @@ def main() -> None:
         # Native lifecycle, independent of which local or SharePoint page is open.
         window.events.shown += updates.start
     logger.info(
-        "Aplicativo iniciado: version=%s executable=%s data_dir=%s navigation=webview2-native",
+        "Aplicativo iniciado: version=%s executable=%s data_dir=%s navigation=%s",
         __version__,
         sys.executable,
         data_dir,
+        backend,
     )
     normal_exit = False
     try:
         webview.start(
-            gui="edgechromium" if sys.platform == "win32" else None,
+            gui=backend,
             private_mode=False,
             storage_path=str(data_dir / "webview"),
             icon=str(icon),
