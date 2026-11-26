@@ -89,7 +89,10 @@ jobs:
           .venv/bin/python scripts/test_portable_keyring.py
       - name: Testar WebKitGTK
         if: runner.os == 'Linux'
-        run: xvfb-run -a .venv/bin/python scripts/test_portable_native.py
+        env:
+          PYWEBVIEW_LOG: debug
+          WEBKIT_DMABUF_RENDERER_FORCE_SHM: '1'
+        run: dbus-run-session -- xvfb-run -a .venv/bin/python scripts/test_portable_native.py
       - name: Testar WKWebView
         if: runner.os == 'macOS'
         run: .venv/bin/python scripts/test_portable_native.py
@@ -99,8 +102,9 @@ jobs:
         if: runner.os == 'Linux'
         env:
           PACKAGE: ${{ matrix.package }}
+          WEBKIT_DMABUF_RENDERER_FORCE_SHM: '1'
         run: |
-          xvfb-run -a .venv/bin/python scripts/test_portable_startup.py "$PWD/dist/ACMAIS LINK/ACMAIS LINK"
+          dbus-run-session -- xvfb-run -a .venv/bin/python scripts/test_portable_startup.py "$PWD/dist/ACMAIS LINK/ACMAIS LINK"
           mkdir -p artifacts
           tar -C dist -czf "artifacts/ACMAIS-LINK-candidato-$PACKAGE.tar.gz" "ACMAIS LINK"
       - name: Validar pacote macOS e arquivar

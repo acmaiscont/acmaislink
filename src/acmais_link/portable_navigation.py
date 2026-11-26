@@ -101,6 +101,10 @@ class PortableNavigationWindow:
 
     def navigate(self, url, is_current):
         def load(browser):
+            self._window.real_url = url
+            for event in (self._window.events.loaded, self._window.events.before_load,
+                          self._window.events._pywebviewready):
+                event.clear()
             if self._backend == "cocoa":
                 from Foundation import NSURL, NSURLRequest
 

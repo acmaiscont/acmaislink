@@ -32,6 +32,11 @@ class GtkControls:
         root.pack_start(self._bar, False, False, 0)
         root.pack_start(self._web, True, True, 0)
         root.pack_start(self._cover, True, True, 0)
+        for widget in (self._bar, self._web, self._cover):
+            widget.show_all()
+            # pywebview raises the window with Gtk.Window.show_all().
+            widget.set_no_show_all(True)
+        self.show_home()
         root.show()
 
     @staticmethod
@@ -60,7 +65,7 @@ class GtkControls:
         self._web.hide()
         self._title.set_text(title)
         self._cancel.set_label(cancel)
-        self._cover.show_all()
+        self._cover.show()
         self.update_loading(detail, None)
         self._cancel.grab_focus()
         return True
@@ -85,5 +90,5 @@ class GtkControls:
 
     def show_folder(self, _label):
         self.show_home()
-        self._bar.show_all()
+        self._bar.show()
         return True

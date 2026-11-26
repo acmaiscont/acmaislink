@@ -11,7 +11,9 @@ from acmais_link.portable_navigation import PortableNavigationWindow
 def check_native_window(window, native, home, result):
     try:
         if not window.events.loaded.wait(20):
-            raise RuntimeError("O WebKit não carregou a página de teste.")
+            url = native.get_current_url()
+            state = native.evaluate_navigation_js("document.readyState", lambda: True)
+            raise RuntimeError(f"O WebKit não completou a carga. URL={url!r}, documento={state!r}")
         current = lambda: True
         assert native.evaluate_navigation_js(
             "({title: document.title, text: document.querySelector('h1').textContent})", current,
