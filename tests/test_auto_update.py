@@ -85,7 +85,7 @@ class AutoUpdateTests(unittest.TestCase):
         path, silent, metadata = service.launches[0]
         self.assertTrue(silent)
         self.assertEqual(metadata, release_metadata())
-        self.assertEqual(path.parent, self.data / "updates")
+        self.assertEqual(path.parent, (self.data / "updates").resolve())
         self.assertTrue((path.parent / "manifest.json").exists())
 
     def test_new_session_confirms_cache_without_redownloading(self):
